@@ -3,7 +3,10 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=["backend/.env", ".env"],  # works from project root or backend/
+        extra="ignore",
+    )
 
     OPENAI_API_KEY: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./ernesto.db"

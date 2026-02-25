@@ -78,6 +78,14 @@ async def run_intake(state: dict[str, Any]) -> dict[str, Any]:
     response = await llm.ainvoke(messages)
     raw = response.content.strip()
 
+    # Strip markdown code fences if the model wraps its response
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]  # drop opening fence
+        if raw.startswith("json"):
+            raw = raw[4:]             # drop language tag
+        raw = raw.rsplit("```", 1)[0] # drop closing fence
+        raw = raw.strip()
+
     try:
         item_data = json.loads(raw)
     except json.JSONDecodeError:

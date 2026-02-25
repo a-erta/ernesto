@@ -72,8 +72,14 @@ async def _analyse_offer(
         })),
     ]
     response = await llm.ainvoke(messages)
+    raw = response.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
     try:
-        return json.loads(response.content.strip())
+        return json.loads(raw)
     except json.JSONDecodeError:
         return {"recommendation": "counter", "counter_price": None, "reasoning": response.content}
 

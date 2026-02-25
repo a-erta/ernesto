@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
 
 from ..models.db import (
     get_db, DBItem, DBListing, DBOffer, DBMessage, DBComparable,
@@ -37,14 +38,23 @@ CHECKPOINT_DB = "./ernesto_checkpoints.db"
 
 @router.get("/items", response_model=list[Item])
 async def list_items(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DBItem).order_by(desc(DBItem.created_at)))
+    result = await db.execute(
+        select(DBItem)
+        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .order_by(desc(DBItem.created_at))
+    )
     items = result.scalars().all()
     return items
 
 
 @router.get("/items/{item_id}", response_model=Item)
 async def get_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(DBItem, item_id)
+    result = await db.execute(
+        select(DBItem)
+        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .where(DBItem.id == item_id)
+    )
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
@@ -75,7 +85,13 @@ async def create_item(
     )
     db.add(db_item)
     await db.commit()
-    await db.refresh(db_item)
+
+    result = await db.execute(
+        select(DBItem)
+        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .where(DBItem.id == db_item.id)
+    )
+    db_item = result.scalar_one()
 
     background_tasks.add_task(
         run_agent_pipeline,
@@ -234,60 +250,96 @@ async def run_agent_pipeline(
         "errors": [],
     }
 
+    log.info("pipeline.start", item_id=item_id, platforms=platforms)
     await manager.broadcast(str(item_id), {"type": "step", "step": "intake", "item_id": item_id})
 
-    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
-        graph = build_graph().compile(
-            checkpointer=saver,
-            interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
-        )
-        config = {"configurable": {"thread_id": thread_id}}
+    try:
+        async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
+            graph = build_graph().compile(
+                checkpointer=saver,
+                interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
+            )
+            config = {"configurable": {"thread_id": thread_id}}
 
-        async for event in graph.astream(initial_state, config=config):
-            node_name = list(event.keys())[0] if event else "unknown"
-            state_snapshot = list(event.values())[0] if event else {}
-            log.info("graph.event", node=node_name, item_id=item_id)
+            async for event in graph.astream(initial_state, config=config, stream_mode="updates"):
+                if not isinstance(event, dict):
+                    # LangGraph emits interrupt signals as tuples — skip them
+                    log.info("graph.interrupt", item_id=item_id)
+                    continue
+                for node_name, state_snapshot in event.items():
+                    if node_name == "__interrupt__":
+                        log.info("graph.awaiting_human", item_id=item_id)
+                        continue
+                    if not isinstance(state_snapshot, dict):
+                        continue
+                    log.info("graph.event", node=node_name, item_id=item_id)
 
-            await manager.broadcast(str(item_id), {
-                "type": "step",
-                "step": node_name,
-                "item_id": item_id,
-                "data": _safe_state(state_snapshot),
-            })
+                    await manager.broadcast(str(item_id), {
+                        "type": "step",
+                        "step": node_name,
+                        "item_id": item_id,
+                        "data": _safe_state(state_snapshot),
+                    })
 
-            # Persist key state back to DB
-            await _sync_state_to_db(item_id, node_name, state_snapshot)
+                    await _sync_state_to_db(item_id, node_name, state_snapshot)
+
+        log.info("pipeline.complete", item_id=item_id)
+
+    except Exception as e:
+        log.error("pipeline.error", item_id=item_id, error=str(e), exc_info=True)
+        # Mark item as errored in DB so UI reflects it
+        from ..models.db import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            item = await db.get(DBItem, item_id)
+            if item:
+                item.status = ItemStatusEnum.archived
+                item.ai_analysis = json.dumps({"error": str(e)})
+                await db.commit()
+        await manager.broadcast(str(item_id), {
+            "type": "error",
+            "item_id": item_id,
+            "error": str(e),
+        })
 
 
 async def resume_agent(item_id: int, human_input: dict):
     """Resume a paused graph after human input."""
     thread_id = str(item_id)
+    log.info("pipeline.resume", item_id=item_id, action=human_input.get("action"))
 
-    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
-        graph = build_graph().compile(
-            checkpointer=saver,
-            interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
-        )
-        config = {"configurable": {"thread_id": thread_id}}
+    try:
+        async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
+            graph = build_graph().compile(
+                checkpointer=saver,
+                interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
+            )
+            config = {"configurable": {"thread_id": thread_id}}
 
-        # Inject human input into the state
-        current = await graph.aget_state(config)
-        updated_state = {**current.values, "human_input": human_input, "awaiting_human": False}
-        await graph.aupdate_state(config, updated_state)
+            current = await graph.aget_state(config)
+            updated_state = {**current.values, "human_input": human_input, "awaiting_human": False}
+            await graph.aupdate_state(config, updated_state)
 
-        await manager.broadcast(str(item_id), {"type": "resumed", "item_id": item_id, "input": human_input})
+            await manager.broadcast(str(item_id), {"type": "resumed", "item_id": item_id, "input": human_input})
 
-        async for event in graph.astream(None, config=config):
-            node_name = list(event.keys())[0] if event else "unknown"
-            state_snapshot = list(event.values())[0] if event else {}
+            async for event in graph.astream(None, config=config, stream_mode="updates"):
+                if not isinstance(event, dict):
+                    log.info("graph.interrupt", item_id=item_id)
+                    continue
+                for node_name, state_snapshot in event.items():
+                    if node_name == "__interrupt__" or not isinstance(state_snapshot, dict):
+                        continue
+                    log.info("graph.event", node=node_name, item_id=item_id)
+                    await manager.broadcast(str(item_id), {
+                        "type": "step",
+                        "step": node_name,
+                        "item_id": item_id,
+                        "data": _safe_state(state_snapshot),
+                    })
+                    await _sync_state_to_db(item_id, node_name, state_snapshot)
 
-            await manager.broadcast(str(item_id), {
-                "type": "step",
-                "step": node_name,
-                "item_id": item_id,
-                "data": _safe_state(state_snapshot),
-            })
-            await _sync_state_to_db(item_id, node_name, state_snapshot)
+    except Exception as e:
+        log.error("resume.error", item_id=item_id, error=str(e), exc_info=True)
+        await manager.broadcast(str(item_id), {"type": "error", "item_id": item_id, "error": str(e)})
 
 
 async def _sync_state_to_db(item_id: int, node_name: str, state: dict):
@@ -373,8 +425,10 @@ async def _sync_state_to_db(item_id: int, node_name: str, state: dict):
         await db.commit()
 
 
-def _safe_state(state: dict) -> dict:
+def _safe_state(state: object) -> dict:
     """Strip non-serialisable fields before broadcasting."""
+    if not isinstance(state, dict):
+        return {}
     safe = {}
     for k, v in state.items():
         try:

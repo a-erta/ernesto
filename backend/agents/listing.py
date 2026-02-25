@@ -119,6 +119,12 @@ async def run_listing(state: dict[str, Any]) -> dict[str, Any]:
     response = await llm.ainvoke(messages)
     raw = response.content.strip()
 
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+
     try:
         listing_copy = json.loads(raw)
     except json.JSONDecodeError:
