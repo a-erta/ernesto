@@ -1,0 +1,37 @@
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+websockets==14.1
+
+# LangGraph + LangChain
+langgraph==1.0.9
+langgraph-checkpoint-sqlite==3.0.3
+langchain==0.3.18
+langchain-openai==0.3.6
+
+# Database
+sqlalchemy==2.0.37
+alembic==1.14.1
+aiosqlite==0.20.0
+
+# Pydantic
+pydantic==2.10.6
+pydantic-settings==2.7.1
+
+# Platform integrations
+ebaysdk==2.2.0
+playwright==1.50.0
+
+# HTTP
+httpx==0.28.1
+aiohttp==3.11.11
+
+# Image handling
+Pillow==11.1.0
+python-magic==0.4.27
+
+# Utilities
+python-dotenv==1.0.1
+tenacity==9.0.0
+structlog==24.4.0
