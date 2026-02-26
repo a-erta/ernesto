@@ -18,11 +18,12 @@ log = structlog.get_logger()
 
 LISTING_SYSTEM_PROMPT = """You are an expert copywriter for second-hand selling platforms.
 Given structured item data and a list of comparable sold listings, generate:
+- proposed_description: a clear, honest, buyer-friendly item description (plain text, 3-5 sentences). This is the master description the seller will review and edit before publishing.
 - ebay_title: eBay-optimised title (keyword-rich, max 80 chars)
-- ebay_description: eBay listing description (HTML allowed, 2-4 paragraphs)
+- ebay_description: eBay listing description (HTML allowed, 2-4 paragraphs, based on proposed_description)
 - vinted_title: Vinted-optimised title (casual, friendly, max 60 chars)
-- vinted_description: Vinted description (conversational, 1-2 paragraphs)
-- suggested_price: recommended asking price in USD based on comparables
+- vinted_description: Vinted description (conversational, 1-2 paragraphs, based on proposed_description)
+- suggested_price: recommended asking price in EUR based on comparables
 - price_rationale: brief explanation of the price recommendation
 
 Respond ONLY with valid JSON. No markdown, no explanation."""
@@ -149,6 +150,7 @@ async def run_listing(state: dict[str, Any]) -> dict[str, Any]:
         "step": "awaiting_approval",
         "comparables": comparables,
         "listing_copy": listing_copy,
+        "proposed_description": listing_copy.get("proposed_description", ""),
         "suggested_price": listing_copy.get("suggested_price") or price_suggestion,
         "awaiting_human": True,
     }

@@ -124,6 +124,7 @@ class DBItem(Base):
     status: Mapped[ItemStatusEnum] = mapped_column(
         SAEnum(ItemStatusEnum), default=ItemStatusEnum.draft
     )
+    proposed_description: Mapped[Optional[str]] = mapped_column(Text)  # AI-generated, editable by user before publish
     ai_analysis: Mapped[Optional[str]] = mapped_column(Text)  # JSON blob
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

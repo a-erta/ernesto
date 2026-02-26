@@ -73,6 +73,7 @@ export interface Item {
   size?: string;
   color?: string;
   user_description?: string;
+  proposed_description?: string;
   image_paths?: string;
   suggested_price?: number;
   final_price?: number;

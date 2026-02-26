@@ -55,6 +55,7 @@ class Item(BaseModel):
     size: Optional[str] = None
     color: Optional[str] = None
     user_description: Optional[str] = None
+    proposed_description: Optional[str] = None
     image_paths: Optional[str] = None
     suggested_price: Optional[float] = None
     final_price: Optional[float] = None

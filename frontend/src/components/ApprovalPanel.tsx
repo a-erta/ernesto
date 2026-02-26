@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, XCircle, TrendingUp, ExternalLink } from "lucide-react";
+import { CheckCircle, XCircle, TrendingUp, ExternalLink, FileText } from "lucide-react";
 import { itemsApi } from "../lib/api";
 import type { Item } from "../types";
 
@@ -11,6 +11,9 @@ interface Props {
 export function ApprovalPanel({ item }: Props) {
   const [finalPrice, setFinalPrice] = useState(
     item.suggested_price?.toFixed(2) ?? ""
+  );
+  const [description, setDescription] = useState(
+    item.proposed_description ?? ""
   );
   const qc = useQueryClient();
 
@@ -23,7 +26,8 @@ export function ApprovalPanel({ item }: Props) {
   })();
 
   const approveMutation = useMutation({
-    mutationFn: () => itemsApi.approve(item.id, parseFloat(finalPrice)),
+    mutationFn: () =>
+      itemsApi.approve(item.id, parseFloat(finalPrice), description),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["item", item.id] }),
   });
 
@@ -40,8 +44,7 @@ export function ApprovalPanel({ item }: Props) {
       </div>
 
       <p className="text-sm text-slate-400">
-        The agent has analysed your item and generated listing copy. Review the details below,
-        adjust the price if needed, then approve to publish.
+        Review the AI-generated listing below. Edit the description and price as needed, then approve to publish.
       </p>
 
       {/* AI Analysis summary */}
@@ -63,6 +66,25 @@ export function ApprovalPanel({ item }: Props) {
           ))}
       </div>
 
+      {/* Description */}
+      <div>
+        <label className="block text-sm font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
+          <FileText className="w-3.5 h-3.5 text-brand-400" />
+          Listing description
+          <span className="text-xs text-slate-500 font-normal ml-1">(AI-generated — edit freely)</span>
+        </label>
+        <textarea
+          className="input w-full resize-y min-h-[120px] font-normal text-sm leading-relaxed"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Describe your item for potential buyers…"
+          rows={5}
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          {description.length} characters · This description will be used across all selected platforms.
+        </p>
+      </div>
+
       {/* Comparables */}
       {item.comparables.length > 0 && (
         <div>
@@ -77,7 +99,7 @@ export function ApprovalPanel({ item }: Props) {
               >
                 <span className="text-slate-300 truncate flex-1 mr-2">{c.title}</span>
                 <span className="text-green-400 font-medium whitespace-nowrap">
-                  ${c.sold_price.toFixed(2)}
+                  €{c.sold_price.toFixed(2)}
                 </span>
                 {c.url && (
                   <a
@@ -98,7 +120,7 @@ export function ApprovalPanel({ item }: Props) {
       {/* Price */}
       <div>
         <label className="block text-sm font-medium text-slate-300 mb-1.5">
-          Final asking price ($)
+          Final asking price (€)
         </label>
         <div className="flex gap-2">
           <input
@@ -114,7 +136,7 @@ export function ApprovalPanel({ item }: Props) {
               className="btn-secondary whitespace-nowrap text-xs"
               onClick={() => setFinalPrice(item.suggested_price!.toFixed(2))}
             >
-              Use ${item.suggested_price.toFixed(2)}
+              Use €{item.suggested_price.toFixed(2)}
             </button>
           )}
         </div>

@@ -11,8 +11,11 @@ export const itemsApi = {
       headers: { "Content-Type": "multipart/form-data" },
     }).then((r) => r.data),
   delete: (id: number) => api.delete(`/items/${id}`).then((r) => r.data),
-  approve: (id: number, finalPrice: number) =>
-    api.post(`/items/${id}/approve?final_price=${finalPrice}`).then((r) => r.data),
+  approve: (id: number, finalPrice: number, description?: string) => {
+    const params = new URLSearchParams({ final_price: String(finalPrice) });
+    if (description !== undefined) params.set("description", description);
+    return api.post(`/items/${id}/approve?${params}`).then((r) => r.data);
+  },
   cancel: (id: number) => api.post(`/items/${id}/cancel`).then((r) => r.data),
   getListings: (id: number) =>
     api.get<Listing[]>(`/items/${id}/listings`).then((r) => r.data),

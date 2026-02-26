@@ -156,6 +156,7 @@ async def approve_listing(
     item_id: int,
     final_price: float,
     background_tasks: BackgroundTasks,
+    description: Optional[str] = None,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -168,13 +169,20 @@ async def approve_listing(
 
     item.final_price = final_price
     item.status = ItemStatusEnum.publishing
+    # Persist the user-edited description (overrides AI proposal if provided)
+    if description is not None:
+        item.proposed_description = description
     await db.commit()
 
     background_tasks.add_task(
         resume_agent,
         item_id=item_id,
         user_id=current_user.user_id,
-        human_input={"action": "approve", "final_price": final_price},
+        human_input={
+            "action": "approve",
+            "final_price": final_price,
+            "description": description or item.proposed_description,
+        },
     )
     return {"ok": True}
 
@@ -438,6 +446,7 @@ async def _sync_state_to_db(item_id: int, node_name: str, state: dict):
             item.size = d.get("size")
             item.ai_analysis = json.dumps(d)
             item.suggested_price = state.get("suggested_price")
+            item.proposed_description = state.get("proposed_description") or ""
             item.status = ItemStatusEnum.ready
 
             # Save comparables

@@ -27,6 +27,7 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
   const queryClient = useQueryClient();
   const { lastEvent } = useItemWebSocket(itemId);
   const [finalPrice, setFinalPrice] = useState("");
+  const [description, setDescription] = useState("");
   const [counterAmount, setCounterAmount] = useState("");
 
   const { data: item, isLoading } = useQuery({
@@ -34,6 +35,13 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
     queryFn: () => getItem(itemId),
     refetchInterval: lastEvent?.type === "step" ? 3000 : 10000,
   });
+
+  // Pre-fill description from AI proposal when item loads
+  React.useEffect(() => {
+    if (item?.proposed_description && !description) {
+      setDescription(item.proposed_description);
+    }
+  }, [item?.proposed_description]);
 
   const { data: offers } = useQuery({
     queryKey: ["offers", itemId],
@@ -43,7 +51,7 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
   });
 
   const approveMutation = useMutation({
-    mutationFn: () => approveItem(itemId, parseFloat(finalPrice)),
+    mutationFn: () => approveItem(itemId, parseFloat(finalPrice), description),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["item", itemId] });
       queryClient.invalidateQueries({ queryKey: ["items"] });
@@ -118,8 +126,23 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
         <View style={styles.approvalCard}>
           <Text style={styles.approvalTitle}>Review & Approve</Text>
           <Text style={styles.approvalDesc}>
-            Set your final price and publish to all selected platforms.
+            Edit the description and set your final price, then publish.
           </Text>
+
+          <Text style={styles.fieldLabel}>Description</Text>
+          <TextInput
+            style={styles.descriptionInput}
+            multiline
+            numberOfLines={5}
+            placeholder="Describe your item for buyers…"
+            value={description}
+            onChangeText={setDescription}
+            placeholderTextColor="#94a3b8"
+            textAlignVertical="top"
+          />
+          <Text style={styles.charCount}>{description.length} characters</Text>
+
+          <Text style={styles.fieldLabel}>Final price (€)</Text>
           <TextInput
             style={styles.priceInput}
             keyboardType="decimal-pad"
@@ -259,6 +282,18 @@ const styles = StyleSheet.create({
   },
   approvalTitle: { fontSize: 16, fontWeight: "700", color: "#1e293b" },
   approvalDesc: { fontSize: 13, color: "#64748b" },
+  fieldLabel: { fontSize: 13, fontWeight: "600", color: "#475569", marginTop: 4 },
+  descriptionInput: {
+    borderWidth: 1.5,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    color: "#1e293b",
+    minHeight: 110,
+    backgroundColor: "#f8fafc",
+  },
+  charCount: { fontSize: 11, color: "#94a3b8", textAlign: "right" },
   priceInput: {
     borderWidth: 1.5,
     borderColor: "#e2e8f0",

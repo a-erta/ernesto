@@ -26,6 +26,7 @@ export interface Item {
   id: number;
   title: string | null;
   description: string | null;
+  proposed_description: string | null;
   category: string | null;
   brand: string | null;
   condition: string | null;
@@ -62,10 +63,11 @@ export const getItem = (id: number) =>
 export const getOffers = (itemId: number) =>
   api.get<Offer[]>(`/api/items/${itemId}/offers`).then((r) => r.data);
 
-export const approveItem = (itemId: number, finalPrice: number) =>
-  api
-    .post(`/api/items/${itemId}/approve`, null, { params: { final_price: finalPrice } })
-    .then((r) => r.data);
+export const approveItem = (itemId: number, finalPrice: number, description?: string) => {
+  const params: Record<string, string> = { final_price: String(finalPrice) };
+  if (description !== undefined) params.description = description;
+  return api.post(`/api/items/${itemId}/approve`, null, { params }).then((r) => r.data);
+};
 
 export const cancelItem = (itemId: number) =>
   api.post(`/api/items/${itemId}/cancel`).then((r) => r.data);
