@@ -14,10 +14,16 @@ langchain-openai==0.3.6
 sqlalchemy==2.0.37
 alembic==1.14.1
 aiosqlite==0.20.0
+# PostgreSQL (production) — install when DATABASE_URL is postgresql://
+# asyncpg==0.30.0
+# langgraph-checkpoint-postgres  (install from PyPI when needed)
 
 # Pydantic
 pydantic==2.10.6
 pydantic-settings==2.7.1
+
+# Auth
+python-jose[cryptography]==3.3.0
 
 # Platform integrations
 ebaysdk==2.2.0
@@ -30,6 +36,15 @@ aiohttp==3.11.11
 # Image handling
 Pillow==11.1.0
 python-magic==0.4.27
+
+# Storage — S3 (production)
+# aioboto3==13.3.0  (install when S3_BUCKET is set)
+
+# Real-time — Redis (production)
+# redis[asyncio]==5.2.1  (install when REDIS_URL is set)
+
+# Encryption (for platform credentials)
+# cryptography==44.0.0  (install when FERNET_KEY is set)
 
 # Utilities
 python-dotenv==1.0.1

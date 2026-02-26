@@ -8,25 +8,64 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- Core ---
     OPENAI_API_KEY: str = ""
     DATABASE_URL: str = "sqlite+aiosqlite:///./ernesto.db"
     SECRET_KEY: str = "dev-secret-key"
-    CORS_ORIGINS: str = "http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:8081"
 
-    # eBay
+    # --- Local dev mode (bypasses auth, S3, Redis) ---
+    LOCAL_DEV: bool = True
+
+    # --- Auth (Cognito — production only) ---
+    AWS_REGION: str = "us-east-1"
+    COGNITO_USER_POOL_ID: str = ""
+    COGNITO_APP_CLIENT_ID: str = ""
+
+    # --- Database (PostgreSQL — production) ---
+    # Leave as sqlite default for local dev; set to postgresql+asyncpg://... for cloud
+    # DATABASE_URL is already defined above
+
+    # --- Storage (S3 — production) ---
+    # If S3_BUCKET is empty, falls back to local ./uploads/ directory
+    S3_BUCKET: str = ""
+    CLOUDFRONT_DOMAIN: str = ""
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+
+    # --- Real-time (Redis — production) ---
+    # If REDIS_URL is empty, falls back to in-memory WebSocket manager
+    REDIS_URL: str = ""
+
+    # --- Encryption (for platform credentials at rest) ---
+    FERNET_KEY: str = ""
+
+    # --- eBay ---
     EBAY_APP_ID: str = ""
     EBAY_CERT_ID: str = ""
     EBAY_DEV_ID: str = ""
     EBAY_USER_TOKEN: str = ""
     EBAY_SANDBOX: bool = True
 
-    # Telegram (optional)
+    # --- Telegram (optional) ---
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
 
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def use_postgres(self) -> bool:
+        return self.DATABASE_URL.startswith("postgresql")
+
+    @property
+    def use_s3(self) -> bool:
+        return bool(self.S3_BUCKET)
+
+    @property
+    def use_redis(self) -> bool:
+        return bool(self.REDIS_URL)
 
 
 settings = Settings()

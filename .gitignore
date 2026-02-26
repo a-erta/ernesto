@@ -21,6 +21,17 @@ uploads/*
 frontend/dist/
 frontend/node_modules/
 
+# Mobile
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/android/
+mobile/ios/
+mobile/.env
+
+# Docker
+.docker/
+
 # macOS
 .DS_Store
 

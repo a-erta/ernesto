@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import String, Float, DateTime, ForeignKey, Text, Enum as SAEnum
+from sqlalchemy import String, Float, DateTime, ForeignKey, Text, Enum as SAEnum, Boolean
 from datetime import datetime, timezone
 from typing import Optional, List
 import enum
@@ -52,10 +52,63 @@ class PlatformEnum(str, enum.Enum):
     depop = "depop"
 
 
+class DBUser(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)  # Cognito sub
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    items: Mapped[List["DBItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    platform_credentials: Mapped[List["DBPlatformCredential"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    devices: Mapped[List["DBDevice"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class DBPlatformCredential(Base):
+    """Encrypted per-user platform credentials (eBay token, Vinted cookies, etc.)"""
+    __tablename__ = "platform_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(128), ForeignKey("users.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(50))
+    credentials_enc: Mapped[str] = mapped_column(Text)  # Fernet-encrypted JSON
+    is_sandbox: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user: Mapped["DBUser"] = relationship(back_populates="platform_credentials")
+
+
+class DBDevice(Base):
+    """Push notification device tokens (iOS/Android)."""
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(128), ForeignKey("users.id"), index=True)
+    device_token: Mapped[str] = mapped_column(String(500), unique=True)
+    platform: Mapped[str] = mapped_column(String(10))  # 'ios' | 'android'
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["DBUser"] = relationship(back_populates="devices")
+
+
 class DBItem(Base):
     __tablename__ = "items"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(128), ForeignKey("users.id"), index=True)
     title: Mapped[Optional[str]] = mapped_column(String(200))
     description: Mapped[Optional[str]] = mapped_column(Text)
     category: Mapped[Optional[str]] = mapped_column(String(100))
@@ -81,6 +134,7 @@ class DBItem(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    user: Mapped["DBUser"] = relationship(back_populates="items")
     listings: Mapped[List["DBListing"]] = relationship(back_populates="item", cascade="all, delete-orphan")
     comparables: Mapped[List["DBComparable"]] = relationship(back_populates="item", cascade="all, delete-orphan")
 

@@ -16,20 +16,37 @@ from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 
 from ..models.db import (
-    get_db, DBItem, DBListing, DBOffer, DBMessage, DBComparable,
+    get_db, DBItem, DBListing, DBOffer, DBMessage, DBComparable, DBUser,
     ItemStatusEnum, ListingStatusEnum, OfferStatusEnum,
 )
-from ..models.schemas import Item, Listing, Offer, Message, OfferDecision, AgentState
+from ..models.schemas import Item, Listing, Offer, Message, OfferDecision
 from ..graph.workflow import build_graph
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from ..auth import get_current_user, AuthUser
+from ..storage import upload_image, get_image_url
+from ..config import settings
 from .websocket import manager
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api")
 
-UPLOAD_DIR = Path("./uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = "./ernesto_checkpoints.db"
+
+
+def _get_checkpointer():
+    """Return the appropriate LangGraph checkpointer based on DATABASE_URL."""
+    if settings.use_postgres:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+        return AsyncPostgresSaver.from_conn_string(settings.DATABASE_URL)
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    return AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB)
+
+
+async def _ensure_user(user: AuthUser, db: AsyncSession):
+    """Upsert the authenticated user into the users table."""
+    existing = await db.get(DBUser, user.user_id)
+    if not existing:
+        db.add(DBUser(id=user.user_id, email=user.email))
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -37,10 +54,14 @@ CHECKPOINT_DB = "./ernesto_checkpoints.db"
 # ---------------------------------------------------------------------------
 
 @router.get("/items", response_model=list[Item])
-async def list_items(db: AsyncSession = Depends(get_db)):
+async def list_items(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(DBItem)
         .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .where(DBItem.user_id == current_user.user_id)
         .order_by(desc(DBItem.created_at))
     )
     items = result.scalars().all()
@@ -48,11 +69,15 @@ async def list_items(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/items/{item_id}", response_model=Item)
-async def get_item(item_id: int, db: AsyncSession = Depends(get_db)):
+async def get_item(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(DBItem)
         .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
-        .where(DBItem.id == item_id)
+        .where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
     )
     item = result.scalar_one_or_none()
     if not item:
@@ -66,21 +91,21 @@ async def create_item(
     description: Optional[str] = Form(None),
     platforms: str = Form("ebay"),
     images: list[UploadFile] = File(default=[]),
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new item and kick off the agent pipeline."""
-    image_paths: list[str] = []
+    await _ensure_user(current_user, db)
+
+    image_keys: list[str] = []
     for image in images:
-        ext = Path(image.filename).suffix if image.filename else ".jpg"
-        filename = f"{uuid.uuid4()}{ext}"
-        dest = UPLOAD_DIR / filename
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(image.file, f)
-        image_paths.append(str(dest))
+        key = await upload_image(image, current_user.user_id)
+        image_keys.append(key)
 
     db_item = DBItem(
+        user_id=current_user.user_id,
         user_description=description,
-        image_paths=json.dumps(image_paths),
+        image_paths=json.dumps(image_keys),
         status=ItemStatusEnum.analyzing,
     )
     db.add(db_item)
@@ -96,17 +121,25 @@ async def create_item(
     background_tasks.add_task(
         run_agent_pipeline,
         item_id=db_item.id,
-        image_paths=image_paths,
+        image_keys=image_keys,
         user_description=description or "",
         platforms=platforms.split(","),
+        user_id=current_user.user_id,
     )
 
     return db_item
 
 
 @router.delete("/items/{item_id}")
-async def delete_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(DBItem, item_id)
+async def delete_item(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(DBItem).where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
+    )
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     await db.delete(item)
@@ -123,10 +156,13 @@ async def approve_listing(
     item_id: int,
     final_price: float,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Human approves the generated listing and sets the final price."""
-    item = await db.get(DBItem, item_id)
+    result = await db.execute(
+        select(DBItem).where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
+    )
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
@@ -134,18 +170,30 @@ async def approve_listing(
     item.status = ItemStatusEnum.publishing
     await db.commit()
 
-    background_tasks.add_task(resume_agent, item_id=item_id, human_input={"action": "approve", "final_price": final_price})
+    background_tasks.add_task(
+        resume_agent,
+        item_id=item_id,
+        user_id=current_user.user_id,
+        human_input={"action": "approve", "final_price": final_price},
+    )
     return {"ok": True}
 
 
 @router.post("/items/{item_id}/cancel")
-async def cancel_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(DBItem, item_id)
+async def cancel_item(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(DBItem).where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
+    )
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     item.status = ItemStatusEnum.archived
     await db.commit()
-    await resume_agent(item_id=item_id, human_input={"action": "cancel"})
+    await resume_agent(item_id=item_id, user_id=current_user.user_id, human_input={"action": "cancel"})
     return {"ok": True}
 
 
@@ -154,11 +202,16 @@ async def cancel_item(item_id: int, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/items/{item_id}/offers", response_model=list[Offer])
-async def get_offers(item_id: int, db: AsyncSession = Depends(get_db)):
+async def get_offers(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(DBOffer)
         .join(DBListing)
-        .where(DBListing.item_id == item_id)
+        .join(DBItem)
+        .where(DBListing.item_id == item_id, DBItem.user_id == current_user.user_id)
         .order_by(desc(DBOffer.received_at))
     )
     return result.scalars().all()
@@ -169,15 +222,22 @@ async def decide_offer(
     offer_id: int,
     decision: OfferDecision,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Human accepts, declines, or counters an offer."""
     offer = await db.get(DBOffer, offer_id)
     if not offer:
         raise HTTPException(status_code=404, detail="Offer not found")
 
     listing = await db.get(DBListing, offer.listing_id)
     item_id = listing.item_id
+
+    # Verify ownership
+    result = await db.execute(
+        select(DBItem).where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=403, detail="Not your item")
 
     if decision.action == "accept":
         offer.status = OfferStatusEnum.accepted
@@ -193,6 +253,7 @@ async def decide_offer(
     background_tasks.add_task(
         resume_agent,
         item_id=item_id,
+        user_id=current_user.user_id,
         human_input={
             "action": decision.action,
             "offer_id": offer_id,
@@ -207,11 +268,16 @@ async def decide_offer(
 # ---------------------------------------------------------------------------
 
 @router.get("/items/{item_id}/messages", response_model=list[Message])
-async def get_messages(item_id: int, db: AsyncSession = Depends(get_db)):
+async def get_messages(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(DBMessage)
         .join(DBListing)
-        .where(DBListing.item_id == item_id)
+        .join(DBItem)
+        .where(DBListing.item_id == item_id, DBItem.user_id == current_user.user_id)
         .order_by(DBMessage.received_at)
     )
     return result.scalars().all()
@@ -222,9 +288,15 @@ async def get_messages(item_id: int, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/items/{item_id}/listings", response_model=list[Listing])
-async def get_listings(item_id: int, db: AsyncSession = Depends(get_db)):
+async def get_listings(
+    item_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
-        select(DBListing).where(DBListing.item_id == item_id)
+        select(DBListing)
+        .join(DBItem)
+        .where(DBListing.item_id == item_id, DBItem.user_id == current_user.user_id)
     )
     return result.scalars().all()
 
@@ -235,14 +307,18 @@ async def get_listings(item_id: int, db: AsyncSession = Depends(get_db)):
 
 async def run_agent_pipeline(
     item_id: int,
-    image_paths: list[str],
+    image_keys: list[str],
     user_description: str,
     platforms: list[str],
+    user_id: str,
 ):
     """Run the full LangGraph pipeline for a new item."""
-    thread_id = str(item_id)
+    thread_id = f"{user_id}:{item_id}"
+    # Resolve storage keys to local paths or URLs for the intake agent
+    image_paths = [_resolve_image_path(k) for k in image_keys]
     initial_state = {
         "item_id": item_id,
+        "user_id": user_id,
         "step": "intake",
         "image_paths": image_paths,
         "user_description": user_description,
@@ -254,7 +330,7 @@ async def run_agent_pipeline(
     await manager.broadcast(str(item_id), {"type": "step", "step": "intake", "item_id": item_id})
 
     try:
-        async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
+        async with _get_checkpointer() as saver:
             graph = build_graph().compile(
                 checkpointer=saver,
                 interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
@@ -302,13 +378,13 @@ async def run_agent_pipeline(
         })
 
 
-async def resume_agent(item_id: int, human_input: dict):
+async def resume_agent(item_id: int, user_id: str, human_input: dict):
     """Resume a paused graph after human input."""
-    thread_id = str(item_id)
+    thread_id = f"{user_id}:{item_id}"
     log.info("pipeline.resume", item_id=item_id, action=human_input.get("action"))
 
     try:
-        async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as saver:
+        async with _get_checkpointer() as saver:
             graph = build_graph().compile(
                 checkpointer=saver,
                 interrupt_before=["awaiting_approval", "awaiting_offer_decision"],
@@ -437,3 +513,13 @@ def _safe_state(state: object) -> dict:
         except (TypeError, ValueError):
             safe[k] = str(v)
     return safe
+
+
+def _resolve_image_path(key: str) -> str:
+    """
+    For local dev: key is already a filesystem path, return as-is.
+    For S3: key is an S3 object key — the intake agent needs a local temp file
+    or a signed URL. For now we return the key and let the intake agent handle it.
+    In a full S3 implementation you'd download to a temp file here.
+    """
+    return key

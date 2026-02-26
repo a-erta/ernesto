@@ -3,38 +3,59 @@
 Ernesto automates the full lifecycle of selling second-hand items:
 photo → AI analysis → listing generation → multi-platform publishing → inbox management → offer negotiation.
 
+Manage everything from a **web browser** or the **iOS/Android mobile app**.
+
+---
+
 ## Architecture
 
 ```
 ernesto/
 ├── backend/
-│   ├── agents/         # LangGraph nodes (intake, listing, publisher, deal_manager)
-│   ├── platforms/      # Platform adapters (eBay REST API, Vinted Playwright stub)
-│   ├── models/         # SQLAlchemy DB models + Pydantic schemas
-│   ├── graph/          # LangGraph workflow definition
-│   ├── api/            # FastAPI routes + WebSocket manager
-│   ├── config.py       # Settings (loaded from .env)
-│   ├── main.py         # App entrypoint
+│   ├── agents/               # LangGraph nodes (intake, listing, publisher, deal_manager)
+│   ├── platforms/            # Platform adapters (eBay REST API, Vinted Playwright stub)
+│   ├── models/               # SQLAlchemy DB models + Pydantic schemas
+│   ├── graph/                # LangGraph workflow definition
+│   ├── api/
+│   │   ├── routes.py         # Items, offers, messages, listings
+│   │   ├── websocket.py      # Real-time updates (in-memory / Redis)
+│   │   ├── credentials_routes.py  # Per-user platform credentials
+│   │   └── device_routes.py  # Push notification device registration
+│   ├── auth.py               # JWT auth (Cognito in prod, bypassed in LOCAL_DEV)
+│   ├── storage.py            # Image storage (local filesystem / S3)
+│   ├── config.py             # Settings loaded from .env
+│   ├── main.py               # App entrypoint
 │   └── requirements.txt
-└── frontend/
-    └── src/
-        ├── pages/      # Dashboard, ItemDetail
-        ├── components/ # ApprovalPanel, OfferCard, AgentTimeline, ...
-        ├── hooks/      # useItemSocket (WebSocket)
-        └── lib/        # API client
+├── frontend/                 # React + Vite web UI
+│   └── src/
+│       ├── pages/            # Dashboard, ItemDetail
+│       ├── components/       # ApprovalPanel, OfferCard, AgentTimeline, ...
+│       ├── hooks/            # useItemSocket (WebSocket)
+│       └── lib/              # API client
+├── mobile/                   # React Native (Expo) iOS/Android app
+│   └── src/
+│       ├── screens/          # Dashboard, ItemDetail, NewItem, Settings
+│       ├── components/       # StatusBadge
+│       ├── hooks/            # useItemWebSocket
+│       ├── api/              # Axios client
+│       ├── context/          # AuthContext
+│       └── navigation/       # Stack + tab navigator
+├── Dockerfile                # Production container image
+├── docker-compose.yml        # Full local stack (backend + PostgreSQL + Redis + frontend)
+└── .github/workflows/
+    └── deploy.yml            # CI/CD → ECR + ECS Fargate
 ```
 
-## Quick Start
+---
 
-> **Important:** all commands must be run from the **project root** (`ernesto/`), not from inside `backend/`.
+## Quick Start — Local Development (simplest)
+
+> All commands run from the **project root** (`ernesto/`).
 
 ### 1. Backend
 
 ```bash
-# From the ernesto/ root
-cd /path/to/ernesto
-
-# Create and activate the virtual environment (first time only)
+# Create virtual environment (first time only)
 python3 -m venv backend/.venv
 source backend/.venv/bin/activate
 
@@ -43,18 +64,18 @@ pip install -r backend/requirements.txt
 
 # Configure environment (first time only)
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your OPENAI_API_KEY at minimum
+# Edit backend/.env — set OPENAI_API_KEY at minimum
 
-# Start the server
-uvicorn backend.main:app --reload
+# Start the server (accessible on all interfaces for mobile testing)
+uvicorn backend.main:app --reload --host 0.0.0.0
 ```
 
-The API will be available at http://localhost:8000
+API available at http://localhost:8000 · Docs at http://localhost:8000/docs
 
-### 2. Frontend
+### 2. Web Frontend
 
 ```bash
-# In a separate terminal, from the ernesto/ root
+# In a separate terminal
 cd frontend
 npm install       # first time only
 npm run dev
@@ -62,22 +83,80 @@ npm run dev
 
 Open http://localhost:5173
 
+### 3. Mobile App (iOS / Android)
+
+```bash
+cd mobile
+npx expo start
+```
+
+Scan the QR code with **Expo Go** (App Store / Google Play).
+
+> **Phone on the same WiFi?** Update `mobile/.env` to use your Mac's local IP:
+> ```
+> EXPO_PUBLIC_API_URL=http://192.168.1.x:8000
+> ```
+> Find your IP with: `ipconfig getifaddr en0`
+
+---
+
+## Quick Start — Full Cloud-like Stack (Docker)
+
+Runs backend + PostgreSQL + Redis + Vite frontend together. Requires Docker Desktop.
+
+```bash
+export OPENAI_API_KEY=sk-...
+docker compose up --build
+```
+
+| Service    | URL                    |
+|------------|------------------------|
+| Web UI     | http://localhost:5173  |
+| API        | http://localhost:8000  |
+| PostgreSQL | localhost:5432         |
+| Redis      | localhost:6379         |
+
 ---
 
 ## Configuration
 
-Edit `backend/.env`. All variables except `OPENAI_API_KEY` are optional for local development.
+Copy `backend/.env.example` to `backend/.env` and fill in the values you need.
 
-| Variable | Required | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | Yes | GPT-4o for photo analysis, GPT-4o-mini for listing copy |
-| `EBAY_APP_ID` | For eBay | From https://developer.ebay.com |
-| `EBAY_CERT_ID` | For eBay | eBay API credentials |
-| `EBAY_USER_TOKEN` | For eBay | OAuth user token with `sell.*` scopes |
-| `EBAY_SANDBOX` | No | `true` (default) uses eBay sandbox; set `false` for production |
-| `TELEGRAM_BOT_TOKEN` | No | Optional mobile notifications via Telegram bot |
-| `TELEGRAM_CHAT_ID` | No | Your Telegram chat ID |
-| `DATABASE_URL` | No | Defaults to `sqlite+aiosqlite:///./ernesto.db` |
+### Minimum (local dev)
+
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | GPT-4o for photo analysis and listing copy |
+
+`LOCAL_DEV=true` is the default — auth is bypassed, SQLite is used, images go to `./uploads/`.
+
+### eBay integration
+
+| Variable | Description |
+|---|---|
+| `EBAY_APP_ID` | From https://developer.ebay.com |
+| `EBAY_CERT_ID` | eBay API credentials |
+| `EBAY_USER_TOKEN` | OAuth user token with `sell.*` scopes |
+| `EBAY_SANDBOX` | `true` (default) = sandbox; `false` = live |
+
+### Cloud / production
+
+| Variable | Description |
+|---|---|
+| `LOCAL_DEV` | Set to `false` to enable auth, S3, Redis |
+| `DATABASE_URL` | `postgresql+asyncpg://user:pass@host/db` |
+| `AWS_REGION` | e.g. `us-east-1` |
+| `COGNITO_USER_POOL_ID` | Cognito User Pool ID |
+| `COGNITO_APP_CLIENT_ID` | Cognito App Client ID |
+| `S3_BUCKET` | S3 bucket for image uploads |
+| `CLOUDFRONT_DOMAIN` | CloudFront domain for image URLs |
+| `REDIS_URL` | `redis://host:6379` for pub/sub WebSockets |
+| `FERNET_KEY` | Encryption key for stored platform credentials |
+
+Generate a Fernet key:
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ---
 
@@ -88,12 +167,14 @@ Edit `backend/.env`. All variables except `OPENAI_API_KEY` are optional for loca
           ↓
    Intake Agent (GPT-4o vision)
    → identifies item, brand, condition, features
+   → falls back to text-only if image is refused
+   → falls back to placeholder if description only
           ↓
    Listing Agent
    → fetches sold comparables for pricing
    → generates platform-optimised copy
           ↓
-   ⏸ HUMAN APPROVAL
+   ⏸ HUMAN APPROVAL (web or mobile)
    → review AI analysis and comparables
    → adjust price, then approve or cancel
           ↓
@@ -104,13 +185,13 @@ Edit `backend/.env`. All variables except `OPENAI_API_KEY` are optional for loca
    → auto-replies to buyer questions
    → surfaces new offers with AI recommendation
           ↓
-   ⏸ HUMAN OFFER DECISION
+   ⏸ HUMAN OFFER DECISION (web or mobile)
    → accept / counter / decline each offer
           ↓
         [Sold]
 ```
 
-LangGraph persists the full state in `ernesto_checkpoints.db` (SQLite), so the pipeline survives server restarts and can manage multiple items concurrently.
+LangGraph persists the full pipeline state in `ernesto_checkpoints.db` (SQLite) or PostgreSQL (cloud), so it survives server restarts and manages multiple items and users concurrently.
 
 ---
 
@@ -130,9 +211,51 @@ LangGraph persists the full state in `ernesto_checkpoints.db` (SQLite), so the p
 
 ---
 
+## API Reference
+
+Full interactive docs at http://localhost:8000/docs when the backend is running.
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/items` | Upload photos + description, start pipeline |
+| `GET /api/items` | List all items for current user |
+| `GET /api/items/{id}` | Get item detail |
+| `DELETE /api/items/{id}` | Delete item |
+| `POST /api/items/{id}/approve` | Approve listing with final price |
+| `POST /api/items/{id}/cancel` | Cancel and archive item |
+| `GET /api/items/{id}/offers` | List offers |
+| `POST /api/offers/{id}/decide` | Accept / decline / counter an offer |
+| `GET /api/items/{id}/messages` | List buyer messages |
+| `GET /api/items/{id}/listings` | List platform listings |
+| `PUT /api/credentials/ebay` | Save eBay credentials |
+| `PUT /api/credentials/vinted` | Save Vinted credentials |
+| `DELETE /api/credentials/{platform}` | Remove credentials |
+| `POST /api/devices` | Register device for push notifications |
+| `WS /ws/{item_id}` | Real-time pipeline events |
+
+---
+
 ## Development Notes
 
-- The SQLite application database is created automatically at `ernesto/ernesto.db` on first startup
-- Uploaded images are stored in `ernesto/uploads/` and served at `/uploads/<filename>`
-- LangGraph checkpoint state is stored in `ernesto/ernesto_checkpoints.db`
-- The frontend proxies `/api` and `/ws` to `http://localhost:8000` via Vite's dev server config
+- **Database:** Created automatically at `ernesto.db` on first startup. Delete it to reset the schema after model changes.
+- **Checkpoints:** LangGraph state stored in `ernesto_checkpoints.db`. Delete alongside `ernesto.db` when resetting.
+- **Uploads:** Images stored in `./uploads/` locally, served at `/uploads/<filename>`. Set `S3_BUCKET` to use S3 instead.
+- **Auth bypass:** `LOCAL_DEV=true` (default) injects a hardcoded `local-user` — no login required. Set `LOCAL_DEV=false` and configure Cognito for multi-user production use.
+- **WebSockets:** In-memory by default (single process). Set `REDIS_URL` for multi-process / multi-container fan-out.
+- **Vite proxy:** The frontend dev server proxies `/api` and `/ws` to `http://localhost:8000` automatically.
+- **Mobile env:** `mobile/.env` is gitignored. Set `EXPO_PUBLIC_API_URL` to your machine's LAN IP when testing on a physical device.
+
+---
+
+## Deployment (AWS)
+
+Push to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.yml`):
+
+1. Runs tests
+2. Builds Docker image and pushes to ECR
+3. Updates ECS Fargate service with rolling deploy
+
+Required GitHub secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+Required GitHub variables: `AWS_REGION`
+
+Infrastructure needed: ECS cluster + service, ECR repository, RDS PostgreSQL, ElastiCache Redis, S3 bucket, Cognito User Pool, Secrets Manager entries for all env vars.

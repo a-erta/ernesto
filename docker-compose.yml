@@ -1,0 +1,100 @@
+version: "3.9"
+
+# ============================================================
+# Local development stack
+# Starts: backend API + Redis + PostgreSQL + frontend dev server
+# Usage:  docker compose up
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # Backend API
+  # ----------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      LOCAL_DEV: "false"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      DATABASE_URL: "postgresql+asyncpg://ernesto:ernesto@postgres:5432/ernesto"
+      REDIS_URL: "redis://redis:6379"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      S3_BUCKET: "${S3_BUCKET:-}"
+      CLOUDFRONT_DOMAIN: "${CLOUDFRONT_DOMAIN:-}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      COGNITO_USER_POOL_ID: "${COGNITO_USER_POOL_ID:-}"
+      COGNITO_APP_CLIENT_ID: "${COGNITO_APP_CLIENT_ID:-}"
+      FERNET_KEY: "${FERNET_KEY:-}"
+      EBAY_APP_ID: "${EBAY_APP_ID:-}"
+      EBAY_CERT_ID: "${EBAY_CERT_ID:-}"
+      EBAY_DEV_ID: "${EBAY_DEV_ID:-}"
+      EBAY_USER_TOKEN: "${EBAY_USER_TOKEN:-}"
+      EBAY_SANDBOX: "${EBAY_SANDBOX:-true}"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:8081"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # PostgreSQL
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ernesto
+      POSTGRES_PASSWORD: ernesto
+      POSTGRES_DB: ernesto
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ernesto"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Redis
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Frontend (Vite dev server — hot reload)
+  # ----------------------------------------------------------
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    environment:
+      VITE_API_URL: "http://localhost:8000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

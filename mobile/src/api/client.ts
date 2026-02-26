@@ -1,0 +1,101 @@
+import axios from "axios";
+import * as SecureStore from "expo-secure-store";
+
+// In development, point to local backend. Override with env var for production.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 30_000,
+});
+
+// Attach JWT token if available
+api.interceptors.request.use(async (config) => {
+  const token = await SecureStore.getItemAsync("auth_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+export interface Item {
+  id: number;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  brand: string | null;
+  condition: string | null;
+  suggested_price: number | null;
+  final_price: number | null;
+  status: string;
+  image_paths: string | null;
+  created_at: string;
+  listings: Listing[];
+}
+
+export interface Listing {
+  id: number;
+  platform: string;
+  platform_url: string | null;
+  price: number | null;
+  status: string;
+}
+
+export interface Offer {
+  id: number;
+  amount: number;
+  status: string;
+  buyer_username: string | null;
+  counter_amount: number | null;
+  received_at: string;
+}
+
+export const getItems = () => api.get<Item[]>("/api/items").then((r) => r.data);
+
+export const getItem = (id: number) =>
+  api.get<Item>(`/api/items/${id}`).then((r) => r.data);
+
+export const getOffers = (itemId: number) =>
+  api.get<Offer[]>(`/api/items/${itemId}/offers`).then((r) => r.data);
+
+export const approveItem = (itemId: number, finalPrice: number) =>
+  api
+    .post(`/api/items/${itemId}/approve`, null, { params: { final_price: finalPrice } })
+    .then((r) => r.data);
+
+export const cancelItem = (itemId: number) =>
+  api.post(`/api/items/${itemId}/cancel`).then((r) => r.data);
+
+export const decideOffer = (
+  offerId: number,
+  action: "accept" | "decline" | "counter",
+  counterAmount?: number
+) =>
+  api
+    .post(`/api/offers/${offerId}/decide`, { action, counter_amount: counterAmount })
+    .then((r) => r.data);
+
+export const createItem = async (
+  imageUris: string[],
+  description: string,
+  platforms: string
+) => {
+  const form = new FormData();
+  form.append("description", description);
+  form.append("platforms", platforms);
+  for (const uri of imageUris) {
+    const filename = uri.split("/").pop() ?? "photo.jpg";
+    const match = /\.(\w+)$/.exec(filename);
+    const type = match ? `image/${match[1]}` : "image/jpeg";
+    form.append("images", { uri, name: filename, type } as any);
+  }
+  return api
+    .post<Item>("/api/items", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    .then((r) => r.data);
+};
