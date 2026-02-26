@@ -247,7 +247,48 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 
 ---
 
-## Deployment (AWS)
+## Deployment — Render (recommended, simple)
+
+`render.yaml` in the repo root defines the full infrastructure as a Blueprint:
+- **ernesto-api** — Docker web service (the FastAPI backend)
+- **ernesto-db** — PostgreSQL database
+- **ernesto-redis** — Redis (for WebSocket pub/sub)
+
+### Steps
+
+1. Push your code to GitHub (make sure `render.yaml` is committed).
+2. Go to https://dashboard.render.com → **New → Blueprint**.
+3. Connect your GitHub repo — Render reads `render.yaml` automatically.
+4. In the environment variable screen, fill in the secrets marked `sync: false`:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY` | Your OpenAI key |
+| `CORS_ORIGINS` | Your frontend URL, e.g. `https://ernesto.onrender.com` |
+| `FERNET_KEY` | Run: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `EBAY_APP_ID` / `EBAY_CERT_ID` / `EBAY_USER_TOKEN` | eBay developer credentials (optional) |
+| `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` | Only if you want real auth (optional) |
+| `S3_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Only if you want S3 image storage (optional) |
+
+5. Click **Apply** — Render provisions everything and deploys automatically.
+
+`DATABASE_URL` and `REDIS_URL` are wired up automatically from the other services — you don't set those manually.
+
+> **Free tier note:** Render's free web services spin down after 15 minutes of inactivity (cold start ~30s). Upgrade to the Starter plan ($7/mo) for always-on.
+
+### Subsequent deploys
+
+Every push to `main` triggers an automatic redeploy on Render. No extra CI/CD setup needed.
+
+### Environment variables after deploy
+
+Set `LOCAL_DEV=false` (already the default in `render.yaml`). With PostgreSQL and Redis wired in, the app runs fully multi-tenant with persistent storage and real-time WebSockets.
+
+If you don't configure Cognito, set `LOCAL_DEV=true` temporarily — but note this means all requests share a single `local-user` account, which is fine for solo use.
+
+---
+
+## Deployment — AWS ECS (advanced)
 
 Push to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.yml`):
 
