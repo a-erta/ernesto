@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink, MessageSquare, Tag, AlertTriangle } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ExternalLink, MessageSquare, Tag, AlertTriangle, XCircle } from "lucide-react";
 import { itemsApi } from "../lib/api";
 import { StatusBadge } from "../components/StatusBadge";
 import { PlatformBadge } from "../components/PlatformIcon";
@@ -14,6 +14,14 @@ export function ItemDetail() {
   const { id } = useParams<{ id: string }>();
   const itemId = parseInt(id!, 10);
   const qc = useQueryClient();
+
+  const delistMutation = useMutation({
+    mutationFn: (listingId: number) => itemsApi.delist(listingId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["item", itemId] });
+      qc.invalidateQueries({ queryKey: ["items"] });
+    },
+  });
 
   const { data: item, isLoading } = useQuery({
     queryKey: ["item", itemId],
@@ -156,22 +164,22 @@ export function ItemDetail() {
         </div>
       </div>
 
-      {/* Active listings */}
+      {/* Listings */}
       {item.listings.length > 0 && (
         <div className="card space-y-3">
           <h3 className="font-medium flex items-center gap-2">
-            <Tag className="w-4 h-4 text-slate-400" /> Active listings
+            <Tag className="w-4 h-4 text-slate-400" /> Listings
           </h3>
           <div className="space-y-2">
             {item.listings.map((listing) => (
-              <div key={listing.id} className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3">
-                <div className="flex items-center gap-3">
+              <div key={listing.id} className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3 gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <PlatformBadge platform={listing.platform as Platform} />
-                  <span className="text-sm text-slate-300 truncate max-w-xs">{listing.title}</span>
+                  <span className="text-sm text-slate-300 truncate">{listing.title}</span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-shrink-0">
                   {listing.price && (
-                    <span className="text-green-400 font-medium text-sm">${listing.price.toFixed(2)}</span>
+                    <span className="text-green-400 font-medium text-sm">€{listing.price.toFixed(2)}</span>
                   )}
                   <StatusBadge status={listing.status} type="listing" />
                   {listing.platform_url && (
@@ -180,9 +188,24 @@ export function ItemDetail() {
                       target="_blank"
                       rel="noreferrer"
                       className="text-slate-500 hover:text-slate-300 transition-colors"
+                      title="View on platform"
                     >
                       <ExternalLink className="w-4 h-4" />
                     </a>
+                  )}
+                  {listing.status === "published" && (
+                    <button
+                      className="text-slate-500 hover:text-red-400 transition-colors disabled:opacity-40"
+                      title="Delist from platform"
+                      disabled={delistMutation.isPending}
+                      onClick={() => {
+                        if (confirm(`Remove this ${listing.platform} listing?`)) {
+                          delistMutation.mutate(listing.id);
+                        }
+                      }}
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               </div>

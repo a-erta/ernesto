@@ -64,15 +64,26 @@ async def run_publisher(state: dict[str, Any]) -> dict[str, Any]:
                 "platform_url": result.platform_url,
                 "title": title,
                 "price": final_price,
+                "status": "published",
             })
             log.info("publisher.published", platform=platform_name, listing_id=result.platform_listing_id)
         except Exception as e:
             log.error("publisher.error", platform=platform_name, error=str(e))
             errors.append(f"Failed to publish on {platform_name}: {e}")
+            # Always save a listing record so the UI can show it, even if the
+            # platform call failed (e.g. missing credentials). Status = draft.
+            published.append({
+                "platform": platform_name,
+                "platform_listing_id": None,
+                "platform_url": None,
+                "title": title,
+                "price": final_price,
+                "status": "draft",
+            })
 
     return {
         **state,
-        "step": "managing" if published else "error",
+        "step": "managing",
         "published_listings": published,
         "errors": errors,
         "awaiting_human": False,

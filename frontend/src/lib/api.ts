@@ -19,6 +19,8 @@ export const itemsApi = {
   cancel: (id: number) => api.post(`/items/${id}/cancel`).then((r) => r.data),
   getListings: (id: number) =>
     api.get<Listing[]>(`/items/${id}/listings`).then((r) => r.data),
+  delist: (listingId: number) =>
+    api.post(`/listings/${listingId}/delist`).then((r) => r.data),
   getOffers: (id: number) =>
     api.get<Offer[]>(`/items/${id}/offers`).then((r) => r.data),
   getMessages: (id: number) =>

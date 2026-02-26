@@ -29,6 +29,15 @@ from .websocket import manager
 log = structlog.get_logger()
 router = APIRouter(prefix="/api")
 
+
+def _item_options():
+    """Eager-load all relationships needed to serialise an Item response."""
+    return [
+        selectinload(DBItem.listings).selectinload(DBListing.offers),
+        selectinload(DBItem.listings).selectinload(DBListing.messages),
+        selectinload(DBItem.comparables),
+    ]
+
 CHECKPOINT_DB = "./ernesto_checkpoints.db"
 
 
@@ -60,7 +69,7 @@ async def list_items(
 ):
     result = await db.execute(
         select(DBItem)
-        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .options(*_item_options())
         .where(DBItem.user_id == current_user.user_id)
         .order_by(desc(DBItem.created_at))
     )
@@ -76,7 +85,7 @@ async def get_item(
 ):
     result = await db.execute(
         select(DBItem)
-        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .options(*_item_options())
         .where(DBItem.id == item_id, DBItem.user_id == current_user.user_id)
     )
     item = result.scalar_one_or_none()
@@ -113,7 +122,7 @@ async def create_item(
 
     result = await db.execute(
         select(DBItem)
-        .options(selectinload(DBItem.listings), selectinload(DBItem.comparables))
+        .options(*_item_options())
         .where(DBItem.id == db_item.id)
     )
     db_item = result.scalar_one()
@@ -309,6 +318,67 @@ async def get_listings(
     return result.scalars().all()
 
 
+@router.post("/listings/{listing_id}/delist")
+async def delist_listing(
+    listing_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a listing from its platform and mark it as ended."""
+    result = await db.execute(
+        select(DBListing)
+        .join(DBItem)
+        .where(DBListing.id == listing_id, DBItem.user_id == current_user.user_id)
+    )
+    listing = result.scalar_one_or_none()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if listing.status == ListingStatusEnum.ended:
+        raise HTTPException(status_code=400, detail="Listing is already ended")
+
+    # Call the platform adapter to end the listing remotely
+    from ..platforms.ebay import EbayAdapter
+    from ..platforms.vinted import VintedAdapter
+
+    adapters = {"ebay": EbayAdapter, "vinted": VintedAdapter}
+    adapter_cls = adapters.get(listing.platform.value if hasattr(listing.platform, "value") else listing.platform)
+
+    if adapter_cls and listing.platform_listing_id:
+        try:
+            adapter = adapter_cls()
+            await adapter.end_listing(listing.platform_listing_id)
+            log.info("delist.platform_ended", listing_id=listing_id, platform=listing.platform)
+        except Exception as e:
+            log.warning("delist.platform_error", listing_id=listing_id, error=str(e))
+            # Continue — mark as ended locally even if the remote call fails
+
+    listing.status = ListingStatusEnum.ended
+    await db.commit()
+
+    # If all listings for this item are now ended, set item back to ready
+    item_result = await db.execute(
+        select(DBListing).where(
+            DBListing.item_id == listing.item_id,
+            DBListing.status == ListingStatusEnum.published,
+        )
+    )
+    still_live = item_result.scalars().all()
+    if not still_live:
+        item = await db.get(DBItem, listing.item_id)
+        if item and item.status == ItemStatusEnum.listed:
+            item.status = ItemStatusEnum.ready
+            await db.commit()
+
+    await manager.broadcast(str(listing.item_id), {
+        "type": "delisted",
+        "listing_id": listing_id,
+        "item_id": listing.item_id,
+    })
+
+    log.info("delist.complete", listing_id=listing_id)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Agent pipeline helpers
 # ---------------------------------------------------------------------------
@@ -461,17 +531,20 @@ async def _sync_state_to_db(item_id: int, node_name: str, state: dict):
                 ))
 
         elif node_name == "publisher":
-            item.status = ItemStatusEnum.listed
-            for pub in state.get("published_listings", []):
+            published_listings = state.get("published_listings", [])
+            any_published = any(p.get("status") == "published" for p in published_listings)
+            item.status = ItemStatusEnum.listed if any_published else ItemStatusEnum.ready
+            for pub in published_listings:
+                pub_status = pub.get("status", "published")
                 db.add(DBListing(
                     item_id=item_id,
                     platform=pub["platform"],
-                    platform_listing_id=pub["platform_listing_id"],
-                    platform_url=pub["platform_url"],
+                    platform_listing_id=pub.get("platform_listing_id"),
+                    platform_url=pub.get("platform_url"),
                     title=pub["title"],
                     price=pub["price"],
-                    status=ListingStatusEnum.published,
-                    published_at=datetime.now(timezone.utc),
+                    status=ListingStatusEnum.published if pub_status == "published" else ListingStatusEnum.draft,
+                    published_at=datetime.now(timezone.utc) if pub_status == "published" else None,
                 ))
 
         elif node_name == "deal_manager":

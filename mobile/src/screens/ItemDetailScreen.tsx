@@ -12,7 +12,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RouteProp } from "@react-navigation/native";
-import { getItem, getOffers, approveItem, cancelItem, decideOffer } from "../api/client";
+import { getItem, getOffers, approveItem, cancelItem, decideOffer, delistListing } from "../api/client";
 import { RootStackParamList } from "../navigation/types";
 import { StatusBadge } from "../components/StatusBadge";
 import { useItemWebSocket } from "../hooks/useItemWebSocket";
@@ -78,6 +78,15 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
       counter?: number;
     }) => decideOffer(offerId, action, counter),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["offers", itemId] }),
+  });
+
+  const delistMutation = useMutation({
+    mutationFn: (listingId: number) => delistListing(listingId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["item", itemId] });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+    },
+    onError: (e: any) => Alert.alert("Error", e?.message ?? "Failed to delist"),
   });
 
   if (isLoading || !item) {
@@ -186,6 +195,28 @@ export default function ItemDetailScreen({ navigation, route }: Props) {
               <Text style={styles.listingPlatform}>{l.platform}</Text>
               <Text style={styles.listingPrice}>€{l.price?.toFixed(2) ?? "—"}</Text>
               <StatusBadge status={l.status} small />
+              {l.status === "published" && (
+                <TouchableOpacity
+                  style={styles.delistBtn}
+                  disabled={delistMutation.isPending}
+                  onPress={() =>
+                    Alert.alert(
+                      "Delist?",
+                      `Remove this ${l.platform} listing from the platform?`,
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Delist",
+                          style: "destructive",
+                          onPress: () => delistMutation.mutate(l.id),
+                        },
+                      ]
+                    )
+                  }
+                >
+                  <Text style={styles.delistBtnText}>Delist</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </View>
@@ -324,6 +355,16 @@ const styles = StyleSheet.create({
   },
   listingPlatform: { fontSize: 14, fontWeight: "600", color: "#475569", flex: 1 },
   listingPrice: { fontSize: 15, fontWeight: "700", color: "#1e293b" },
+  delistBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#fca5a5",
+    backgroundColor: "#fef2f2",
+  },
+  delistBtnText: { fontSize: 12, fontWeight: "600", color: "#ef4444" },
   offerCard: {
     backgroundColor: "#fff",
     borderRadius: 12,

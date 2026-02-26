@@ -72,6 +72,9 @@ export const approveItem = (itemId: number, finalPrice: number, description?: st
 export const cancelItem = (itemId: number) =>
   api.post(`/api/items/${itemId}/cancel`).then((r) => r.data);
 
+export const delistListing = (listingId: number) =>
+  api.post(`/api/listings/${listingId}/delist`).then((r) => r.data);
+
 export const decideOffer = (
   offerId: number,
   action: "accept" | "decline" | "counter",
