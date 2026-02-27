@@ -1,19 +1,23 @@
 import axios from "axios";
-import * as SecureStore from "expo-secure-store";
+import { supabase, isSupabaseConfigured } from "../context/AuthContext";
 
-// In development, point to local backend. Override with env var for production.
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000";
+const LOCAL_DEV = process.env.EXPO_PUBLIC_LOCAL_DEV === "true";
 
 export const api = axios.create({
   baseURL: BASE_URL,
   timeout: 30_000,
 });
 
-// Attach JWT token if available
+// Attach Supabase JWT when configured (production).
+// In LOCAL_DEV mode, no token is sent — the backend LOCAL_DEV bypass handles auth.
 api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync("auth_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (!LOCAL_DEV && isSupabaseConfigured) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });

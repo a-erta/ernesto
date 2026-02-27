@@ -50,19 +50,19 @@ services:
       - key: CORS_ORIGINS
         sync: false            # e.g. https://your-frontend.onrender.com
 
-      # --- Auth (Cognito) — leave blank to keep LOCAL_DEV-style bypass ---
-      - key: COGNITO_USER_POOL_ID
-        sync: false
-      - key: COGNITO_APP_CLIENT_ID
-        sync: false
-      - key: AWS_REGION
-        value: "us-east-1"
+      # --- Auth (Supabase) — required when LOCAL_DEV=false ---
+      - key: SUPABASE_URL
+        sync: false            # e.g. https://xxxx.supabase.co
+      - key: SUPABASE_JWT_SECRET
+        sync: false            # Supabase dashboard → Settings → API → JWT Secret
 
       # --- Storage (S3) — leave blank to use ephemeral local storage ---
       - key: S3_BUCKET
         sync: false
       - key: CLOUDFRONT_DOMAIN
         sync: false
+      - key: AWS_REGION
+        value: "us-east-1"
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY

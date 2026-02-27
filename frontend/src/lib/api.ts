@@ -1,7 +1,23 @@
 import axios from "axios";
 import type { Item, Listing, Offer, Message } from "../types";
+import { supabase, isSupabaseConfigured } from "./supabase";
 
 const api = axios.create({ baseURL: "/api" });
+
+// Attach Supabase JWT when Supabase is configured (production).
+// In local dev (no Supabase), no Authorization header is sent and the backend
+// LOCAL_DEV bypass handles auth transparently.
+api.interceptors.request.use(async (config) => {
+  if (isSupabaseConfigured) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
 
 export const itemsApi = {
   list: () => api.get<Item[]>("/items").then((r) => r.data),

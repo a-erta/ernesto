@@ -21,36 +21,41 @@ ernesto/
 │   │   ├── websocket.py      # Real-time updates (in-memory / Redis)
 │   │   ├── credentials_routes.py  # Per-user platform credentials
 │   │   └── device_routes.py  # Push notification device registration
-│   ├── auth.py               # JWT auth (Cognito in prod, bypassed in LOCAL_DEV)
+│   ├── auth.py               # JWT auth (Supabase in prod, bypassed in LOCAL_DEV)
 │   ├── storage.py            # Image storage (local filesystem / S3)
 │   ├── config.py             # Settings loaded from .env
 │   ├── main.py               # App entrypoint
 │   └── requirements.txt
 ├── frontend/                 # React + Vite web UI
 │   └── src/
-│       ├── pages/            # Dashboard, ItemDetail
+│       ├── pages/            # Dashboard, ItemDetail, Login
 │       ├── components/       # ApprovalPanel, OfferCard, AgentTimeline, ...
+│       ├── context/          # AuthContext (Supabase session)
 │       ├── hooks/            # useItemSocket (WebSocket)
-│       └── lib/              # API client
+│       └── lib/              # API client, Supabase client
 ├── mobile/                   # React Native (Expo) iOS/Android app
 │   └── src/
-│       ├── screens/          # Dashboard, ItemDetail, NewItem, Settings
+│       ├── screens/          # Dashboard, ItemDetail, NewItem, Settings, Login
 │       ├── components/       # StatusBadge
 │       ├── hooks/            # useItemWebSocket
 │       ├── api/              # Axios client
-│       ├── context/          # AuthContext
+│       ├── context/          # AuthContext (Supabase session)
 │       └── navigation/       # Stack + tab navigator
 ├── Dockerfile                # Production container image
 ├── docker-compose.yml        # Full local stack (backend + PostgreSQL + Redis + frontend)
+├── render.yaml               # Render Blueprint (one-click cloud deploy)
 └── .github/workflows/
-    └── deploy.yml            # CI/CD → ECR + ECS Fargate
+    └── deploy.yml            # CI/CD → ECR + ECS Fargate (manual trigger)
 ```
 
 ---
 
 ## Quick Start — Local Development (simplest)
 
-> All commands run from the **project root** (`ernesto/`).
+> No authentication required locally. `LOCAL_DEV=true` is the default — the backend
+> accepts all requests without a token and the frontend/mobile skip the login screen.
+
+All commands run from the **project root** (`ernesto/`).
 
 ### 1. Backend
 
@@ -81,7 +86,7 @@ npm install       # first time only
 npm run dev
 ```
 
-Open http://localhost:5173
+Open http://localhost:5173 — no login screen, goes straight to the dashboard.
 
 ### 3. Mobile App (iOS / Android)
 
@@ -118,6 +123,55 @@ docker compose up --build
 
 ---
 
+## Authentication
+
+### Local development (default)
+
+`LOCAL_DEV=true` in `backend/.env` bypasses all authentication:
+- The backend injects a hardcoded `local-user` for every request.
+- The web frontend skips the login page entirely.
+- The mobile app skips the login screen entirely.
+- No Supabase account or credentials needed.
+
+### Production — Supabase Auth
+
+Supabase provides **Google SSO + email/password** sign-up out of the box.
+
+#### Setup
+
+1. Create a free project at https://supabase.com.
+2. In your Supabase dashboard go to **Settings → API** and copy:
+   - **Project URL** → `SUPABASE_URL` (backend) / `VITE_SUPABASE_URL` (frontend) / `EXPO_PUBLIC_SUPABASE_URL` (mobile)
+   - **anon/public key** → `SUPABASE_ANON_KEY` / `VITE_SUPABASE_ANON_KEY` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+   - **JWT Secret** → `SUPABASE_JWT_SECRET` (backend only — keep this secret)
+3. To enable Google login: Supabase dashboard → **Authentication → Providers → Google** → add your OAuth credentials.
+4. Set `LOCAL_DEV=false` in `backend/.env`.
+
+#### Backend `.env` (production)
+
+```
+LOCAL_DEV=false
+SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+SUPABASE_JWT_SECRET=your-jwt-secret
+```
+
+#### Frontend `.env` (production)
+
+```
+VITE_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+```
+
+#### Mobile `.env` (production)
+
+```
+EXPO_PUBLIC_LOCAL_DEV=false
+EXPO_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+```
+
+---
+
 ## Configuration
 
 Copy `backend/.env.example` to `backend/.env` and fill in the values you need.
@@ -145,11 +199,12 @@ Copy `backend/.env.example` to `backend/.env` and fill in the values you need.
 |---|---|
 | `LOCAL_DEV` | Set to `false` to enable auth, S3, Redis |
 | `DATABASE_URL` | `postgresql+asyncpg://user:pass@host/db` |
-| `AWS_REGION` | e.g. `us-east-1` |
-| `COGNITO_USER_POOL_ID` | Cognito User Pool ID |
-| `COGNITO_APP_CLIENT_ID` | Cognito App Client ID |
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_JWT_SECRET` | JWT secret from Supabase dashboard (Settings → API) |
 | `S3_BUCKET` | S3 bucket for image uploads |
 | `CLOUDFRONT_DOMAIN` | CloudFront domain for image URLs |
+| `AWS_REGION` | e.g. `us-east-1` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS credentials for S3 |
 | `REDIS_URL` | `redis://host:6379` for pub/sub WebSockets |
 | `FERNET_KEY` | Encryption key for stored platform credentials |
 
@@ -172,10 +227,11 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
           ↓
    Listing Agent
    → fetches sold comparables for pricing
-   → generates platform-optimised copy
+   → generates platform-optimised copy + proposed description
           ↓
    ⏸ HUMAN APPROVAL (web or mobile)
    → review AI analysis and comparables
+   → edit proposed description
    → adjust price, then approve or cancel
           ↓
    Publisher Agent
@@ -221,12 +277,13 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 | `GET /api/items` | List all items for current user |
 | `GET /api/items/{id}` | Get item detail |
 | `DELETE /api/items/{id}` | Delete item |
-| `POST /api/items/{id}/approve` | Approve listing with final price |
+| `POST /api/items/{id}/approve` | Approve listing with final price (+ optional description) |
 | `POST /api/items/{id}/cancel` | Cancel and archive item |
 | `GET /api/items/{id}/offers` | List offers |
 | `POST /api/offers/{id}/decide` | Accept / decline / counter an offer |
 | `GET /api/items/{id}/messages` | List buyer messages |
 | `GET /api/items/{id}/listings` | List platform listings |
+| `POST /api/listings/{id}/delist` | Remove a published listing from a platform |
 | `PUT /api/credentials/ebay` | Save eBay credentials |
 | `PUT /api/credentials/vinted` | Save Vinted credentials |
 | `DELETE /api/credentials/{platform}` | Remove credentials |
@@ -240,7 +297,7 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 - **Database:** Created automatically at `ernesto.db` on first startup. Delete it to reset the schema after model changes.
 - **Checkpoints:** LangGraph state stored in `ernesto_checkpoints.db`. Delete alongside `ernesto.db` when resetting.
 - **Uploads:** Images stored in `./uploads/` locally, served at `/uploads/<filename>`. Set `S3_BUCKET` to use S3 instead.
-- **Auth bypass:** `LOCAL_DEV=true` (default) injects a hardcoded `local-user` — no login required. Set `LOCAL_DEV=false` and configure Cognito for multi-user production use.
+- **Auth bypass:** `LOCAL_DEV=true` (default) injects a hardcoded `local-user` — no login required. Set `LOCAL_DEV=false` and configure Supabase for multi-user production use.
 - **WebSockets:** In-memory by default (single process). Set `REDIS_URL` for multi-process / multi-container fan-out.
 - **Vite proxy:** The frontend dev server proxies `/api` and `/ws` to `http://localhost:8000` automatically.
 - **Mobile env:** `mobile/.env` is gitignored. Set `EXPO_PUBLIC_API_URL` to your machine's LAN IP when testing on a physical device.
@@ -265,9 +322,10 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI key |
 | `CORS_ORIGINS` | Your frontend URL, e.g. `https://ernesto.onrender.com` |
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_JWT_SECRET` | Supabase dashboard → Settings → API → JWT Secret |
 | `FERNET_KEY` | Run: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `EBAY_APP_ID` / `EBAY_CERT_ID` / `EBAY_USER_TOKEN` | eBay developer credentials (optional) |
-| `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` | Only if you want real auth (optional) |
 | `S3_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Only if you want S3 image storage (optional) |
 
 5. Click **Apply** — Render provisions everything and deploys automatically.
@@ -280,17 +338,11 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 
 Every push to `main` triggers an automatic redeploy on Render. No extra CI/CD setup needed.
 
-### Environment variables after deploy
-
-Set `LOCAL_DEV=false` (already the default in `render.yaml`). With PostgreSQL and Redis wired in, the app runs fully multi-tenant with persistent storage and real-time WebSockets.
-
-If you don't configure Cognito, set `LOCAL_DEV=true` temporarily — but note this means all requests share a single `local-user` account, which is fine for solo use.
-
 ---
 
 ## Deployment — AWS ECS (advanced)
 
-Push to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.yml`):
+The GitHub Actions workflow (`.github/workflows/deploy.yml`) is triggered **manually only** (workflow_dispatch) to avoid accidental deploys:
 
 1. Runs tests
 2. Builds Docker image and pushes to ECR
@@ -299,4 +351,10 @@ Push to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.y
 Required GitHub secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
 Required GitHub variables: `AWS_REGION`
 
-Infrastructure needed: ECS cluster + service, ECR repository, RDS PostgreSQL, ElastiCache Redis, S3 bucket, Cognito User Pool, Secrets Manager entries for all env vars.
+Infrastructure needed: ECS cluster + service, ECR repository, RDS PostgreSQL, ElastiCache Redis, S3 bucket, Secrets Manager entries for all env vars.
+
+---
+
+## .github folder
+
+The `.github/` folder **should be committed** to your repository. It contains the GitHub Actions workflow for AWS deployment. Since the workflow is set to `workflow_dispatch` only, it will never run automatically — it's safe to have in the repo and you trigger it manually from the GitHub Actions UI when needed.

@@ -15,26 +15,22 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:8081"
 
     # --- Local dev mode (bypasses auth, S3, Redis) ---
+    # Set to false in production
     LOCAL_DEV: bool = True
 
-    # --- Auth (Cognito — production only) ---
-    AWS_REGION: str = "us-east-1"
-    COGNITO_USER_POOL_ID: str = ""
-    COGNITO_APP_CLIENT_ID: str = ""
-
-    # --- Database (PostgreSQL — production) ---
-    # Leave as sqlite default for local dev; set to postgresql+asyncpg://... for cloud
-    # DATABASE_URL is already defined above
+    # --- Auth — Supabase (production only, ignored when LOCAL_DEV=true) ---
+    SUPABASE_URL: str = ""
+    SUPABASE_JWT_SECRET: str = ""  # Settings > API > JWT Secret in Supabase dashboard
+    SUPABASE_ANON_KEY: str = ""    # Settings > API > anon/public key (used by frontend)
 
     # --- Storage (S3 — production) ---
-    # If S3_BUCKET is empty, falls back to local ./uploads/ directory
     S3_BUCKET: str = ""
     CLOUDFRONT_DOMAIN: str = ""
+    AWS_REGION: str = "us-east-1"
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
 
     # --- Real-time (Redis — production) ---
-    # If REDIS_URL is empty, falls back to in-memory WebSocket manager
     REDIS_URL: str = ""
 
     # --- Encryption (for platform credentials at rest) ---
