@@ -145,9 +145,11 @@ async def run_listing(state: dict[str, Any]) -> dict[str, Any]:
         comps_count=len(comparables),
     )
 
+
     return {
         **state,
         "step": "awaiting_approval",
+        "item_data": item_data,
         "comparables": comparables,
         "listing_copy": listing_copy,
         "proposed_description": listing_copy.get("proposed_description", ""),

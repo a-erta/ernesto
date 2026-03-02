@@ -29,8 +29,9 @@ class EbayAdapter(BasePlatformAdapter):
     """
 
     def __init__(self):
-        self._base = EBAY_SANDBOX_BASE if settings.EBAY_SANDBOX else EBAY_PROD_BASE
-        self._token = settings.EBAY_USER_TOKEN
+        self._sandbox = settings.EBAY_SANDBOX
+        self._base = EBAY_SANDBOX_BASE if self._sandbox else EBAY_PROD_BASE
+        self._token = settings.EBAY_USER_TOKEN if self._sandbox else settings.EBAY_PROD_USER_TOKEN
 
     @property
     def platform_name(self) -> str:
@@ -40,6 +41,7 @@ class EbayAdapter(BasePlatformAdapter):
         return {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
+            "Content-Language": "en-US",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         }
 
@@ -49,13 +51,22 @@ class EbayAdapter(BasePlatformAdapter):
 
         async with httpx.AsyncClient(base_url=self._base) as client:
             # 1. Create inventory item
+            image_urls = [p for p in draft.image_paths if p.startswith("http")]
+            if not image_urls:
+                log.warning("ebay.no_image_urls_using_placeholder", sku=sku)
+                image_urls = ["https://ir.ebaystatic.com/cr/v/c1/ebay-logo-1-1200x630-margin.png"]
             inventory_payload = {
                 "availability": {"shipToLocationAvailability": {"quantity": 1}},
                 "condition": self._map_condition(draft.condition),
+                "packageWeightAndSize": {
+                    "dimensions": {"height": 5, "length": 10, "width": 5, "unit": "INCH"},
+                    "packageType": "PACKAGE_THICK_ENVELOPE",
+                    "weight": {"value": 1, "unit": "POUND"},
+                },
                 "product": {
                     "title": draft.title,
                     "description": draft.description,
-                    "imageUrls": [],  # Images must be hosted URLs in production
+                    "imageUrls": image_urls,
                 },
             }
             resp = await client.put(
@@ -67,6 +78,17 @@ class EbayAdapter(BasePlatformAdapter):
             log.info("ebay.inventory_item_created", sku=sku)
 
             # 2. Create offer
+            listing_policies = draft.extra.get("listing_policies") or {
+                "fulfillmentPolicyId": settings.EBAY_FULFILLMENT_POLICY_ID,
+                "paymentPolicyId": settings.EBAY_PAYMENT_POLICY_ID,
+                "returnPolicyId": settings.EBAY_RETURN_POLICY_ID,
+            }
+            if not listing_policies.get("fulfillmentPolicyId"):
+                raise ValueError(
+                    "eBay requires listing policies. Run 'python test_ebay.py --prod' to set up "
+                    "policies and add EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, "
+                    "EBAY_RETURN_POLICY_ID to backend/.env."
+                )
             offer_payload = {
                 "sku": sku,
                 "marketplaceId": "EBAY_US",
@@ -74,16 +96,23 @@ class EbayAdapter(BasePlatformAdapter):
                 "availableQuantity": 1,
                 "categoryId": draft.category_id,
                 "listingDescription": draft.description,
-                "listingPolicies": draft.extra.get("listing_policies", {}),
+                "listingPolicies": listing_policies,
                 "pricingSummary": {
                     "price": {"value": str(draft.price), "currency": "USD"}
                 },
             }
+            merchant_location_key = draft.extra.get("merchant_location_key") or \
+                settings.EBAY_MERCHANT_LOCATION_KEY
+            if merchant_location_key:
+                offer_payload["merchantLocationKey"] = merchant_location_key
+
             resp = await client.post(
                 "/sell/inventory/v1/offer",
                 json=offer_payload,
                 headers=self._headers(),
             )
+            if not resp.is_success:
+                log.error("ebay.offer_error", status=resp.status_code, body=resp.text, payload=offer_payload)
             resp.raise_for_status()
             offer_id = resp.json()["offerId"]
 
@@ -92,10 +121,12 @@ class EbayAdapter(BasePlatformAdapter):
                 f"/sell/inventory/v1/offer/{offer_id}/publish",
                 headers=self._headers(),
             )
+            if not resp.is_success:
+                log.error("ebay.publish_error", status=resp.status_code, body=resp.text, offer_id=offer_id)
             resp.raise_for_status()
             listing_id = resp.json()["listingId"]
 
-        base_url = "sandbox.ebay.com" if settings.EBAY_SANDBOX else "ebay.com"
+        base_url = "sandbox.ebay.com" if self._sandbox else "ebay.com"
         return PublishedListing(
             platform_listing_id=listing_id,
             platform_url=f"https://www.{base_url}/itm/{listing_id}",
@@ -224,12 +255,15 @@ class EbayAdapter(BasePlatformAdapter):
 
     @staticmethod
     def _map_condition(condition: str) -> str:
+        # USED_EXCELLENT and USED_GOOD are accepted by virtually all eBay categories.
+        # LIKE_NEW and EXCELLENT_REFURBISHED are only valid for specific categories
+        # (e.g. certified refurbished electronics), so we avoid them here.
         mapping = {
             "new": "NEW",
-            "like new": "LIKE_NEW",
-            "excellent": "EXCELLENT_REFURBISHED",
-            "good": "USED_EXCELLENT",
-            "fair": "USED_GOOD",
+            "like new": "USED_EXCELLENT",
+            "excellent": "USED_EXCELLENT",
+            "good": "USED_GOOD",
+            "fair": "USED_ACCEPTABLE",
             "poor": "FOR_PARTS_OR_NOT_WORKING",
         }
         return mapping.get(condition.lower(), "USED_GOOD")

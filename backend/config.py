@@ -36,12 +36,24 @@ class Settings(BaseSettings):
     # --- Encryption (for platform credentials at rest) ---
     FERNET_KEY: str = ""
 
-    # --- eBay ---
+    # --- eBay sandbox ---
     EBAY_APP_ID: str = ""
     EBAY_CERT_ID: str = ""
     EBAY_DEV_ID: str = ""
     EBAY_USER_TOKEN: str = ""
     EBAY_SANDBOX: bool = True
+
+    # --- eBay production ---
+    EBAY_PROD_APP_ID: str = ""
+    EBAY_PROD_CERT_ID: str = ""
+    EBAY_PROD_DEV_ID: str = ""
+    EBAY_PROD_USER_TOKEN: str = ""
+
+    # --- eBay listing policies (set after running test_ebay.py --prod) ---
+    EBAY_FULFILLMENT_POLICY_ID: str = ""
+    EBAY_PAYMENT_POLICY_ID: str = ""
+    EBAY_RETURN_POLICY_ID: str = ""
+    EBAY_MERCHANT_LOCATION_KEY: str = ""
 
     # --- Telegram (optional) ---
     TELEGRAM_BOT_TOKEN: str = ""

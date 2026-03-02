@@ -44,13 +44,20 @@ async def run_publisher(state: dict[str, Any]) -> dict[str, Any]:
 
         title_key, desc_key = PLATFORM_COPY_KEYS.get(platform_name, ("ebay_title", "ebay_description"))
         title = listing_copy.get(title_key) or item_data.get("title", "Item for sale")
-        description = listing_copy.get(desc_key) or ""
+        # Prefer the human-approved description; fall back to LLM-generated copy
+        human_description = state.get("human_input", {}).get("description", "")
+        raw_description = human_description or listing_copy.get(desc_key) or ""
+        # Ensure description is wrapped in HTML for eBay
+        if raw_description and not raw_description.strip().startswith("<"):
+            description = f"<p>{raw_description}</p>"
+        else:
+            description = raw_description
 
         draft = ListingDraft(
             title=title,
             description=description,
             price=final_price,
-            category_id=item_data.get("ebay_category_id", ""),
+            category_id="29223",  # Antiquarian & Collectible — no required item specifics
             condition=item_data.get("condition", "good"),
             image_paths=image_paths,
         )

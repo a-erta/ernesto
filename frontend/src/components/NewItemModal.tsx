@@ -72,7 +72,7 @@ export function NewItemModal({ onClose }: Props) {
           {/* Image upload */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Photos <span className="text-slate-500">(required)</span>
+              Photos <span className="text-slate-500">(optional)</span>
             </label>
             <div
               className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center cursor-pointer hover:border-brand-500 transition-colors"
