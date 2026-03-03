@@ -1,0 +1,171 @@
+"""
+eBay OAuth 2.0 — authorize URL, code exchange, and refresh token.
+Used so each tenant gets their own token and we can refresh without re-prompting.
+"""
+import base64
+import hashlib
+import hmac
+import structlog
+import time
+from urllib.parse import urlencode
+
+import httpx
+
+from .config import settings
+
+log = structlog.get_logger()
+
+# Scopes required for Sell APIs (inventory, account, fulfillment, negotiation)
+DEFAULT_SCOPES = (
+    "https://api.ebay.com/oauth/api_scope "
+    "https://api.ebay.com/oauth/api_scope/sell.inventory "
+    "https://api.ebay.com/oauth/api_scope/sell.account "
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
+    "https://api.ebay.com/oauth/api_scope/sell.negotiation"
+)
+
+TOKEN_URL_PROD = "https://api.ebay.com/identity/v1/oauth2/token"
+TOKEN_URL_SANDBOX = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
+AUTH_URL_PROD = "https://auth.ebay.com/oauth2/authorize"
+AUTH_URL_SANDBOX = "https://auth.sandbox.ebay.com/oauth2/authorize"
+
+
+def _b64(s: bytes) -> str:
+    return base64.urlsafe_b64encode(s).decode().rstrip("=")
+
+
+def _b64d(s: str) -> bytes:
+    pad = 4 - len(s) % 4
+    if pad != 4:
+        s += "=" * pad
+    return base64.urlsafe_b64decode(s)
+
+
+STATE_TTL_SECONDS = 600  # 10 minutes
+
+
+def make_state(user_id: str) -> str:
+    """Create a signed state parameter so we can recover user_id in the callback."""
+    issued = int(time.time())
+    raw = f"{user_id}.{issued}"
+    sig = hmac.new(
+        settings.SECRET_KEY.encode(),
+        raw.encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return _b64(f"{raw}.{sig}".encode())
+
+
+def verify_state(state: str) -> str | None:
+    """Verify state and return user_id, or None if invalid/expired."""
+    try:
+        decoded = _b64d(state).decode()
+        raw, sig = decoded.rsplit(".", 1)
+        expected = hmac.new(
+            settings.SECRET_KEY.encode(),
+            raw.encode(),
+            hashlib.sha256,
+        ).hexdigest()[:32]
+        if not hmac.compare_digest(sig, expected):
+            return None
+        user_id, issued_str = raw.rsplit(".", 1)
+        issued = int(issued_str)
+        if time.time() - issued > STATE_TTL_SECONDS:
+            return None
+        return user_id
+    except Exception:
+        return None
+
+
+def get_authorize_url(
+    user_id: str,
+    redirect_uri: str | None = None,
+    scopes: str | None = None,
+    sandbox: bool = False,
+) -> str:
+    """Build the eBay OAuth authorize URL to send the user to."""
+    redirect_uri = redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI
+    scopes = scopes or getattr(settings, "EBAY_OAUTH_SCOPES", None) or DEFAULT_SCOPES
+    client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    base = AUTH_URL_SANDBOX if sandbox else AUTH_URL_PROD
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": scopes,
+        "state": make_state(user_id),
+    }
+    return f"{base}?{urlencode(params)}"
+
+
+async def exchange_code(
+    code: str,
+    redirect_uri: str | None = None,
+    sandbox: bool = False,
+) -> dict:
+    """
+    Exchange authorization code for access_token and refresh_token.
+    Returns dict with access_token, refresh_token, expires_in (seconds).
+    """
+    redirect_uri = redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI
+    url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
+    client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    cert_id = settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID
+    raw = f"{client_id}:{cert_id}"
+    basic = base64.b64encode(raw.encode()).decode()
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            url,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {basic}",
+            },
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+            },
+        )
+    r.raise_for_status()
+    data = r.json()
+    return {
+        "access_token": data["access_token"],
+        "refresh_token": data.get("refresh_token"),
+        "expires_in": data.get("expires_in", 7200),
+    }
+
+
+async def refresh_access_token(
+    refresh_token: str,
+    sandbox: bool = False,
+) -> dict:
+    """
+    Get a new access_token using refresh_token.
+    Returns dict with access_token, expires_in; refresh_token may be rotated.
+    """
+    url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
+    client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    cert_id = settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID
+    raw = f"{client_id}:{cert_id}"
+    basic = base64.b64encode(raw.encode()).decode()
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            url,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {basic}",
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+        )
+    r.raise_for_status()
+    data = r.json()
+    return {
+        "access_token": data["access_token"],
+        "refresh_token": data.get("refresh_token"),  # eBay may return new one
+        "expires_in": data.get("expires_in", 7200),
+    }

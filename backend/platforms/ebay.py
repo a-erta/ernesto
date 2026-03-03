@@ -21,17 +21,50 @@ log = structlog.get_logger()
 EBAY_SANDBOX_BASE = "https://api.sandbox.ebay.com"
 EBAY_PROD_BASE = "https://api.ebay.com"
 
+_MARKETPLACE_CURRENCIES = {
+    "EBAY_US": "USD",
+    "EBAY_CA": "CAD",
+    "EBAY_GB": "GBP",
+    "EBAY_AU": "AUD",
+    "EBAY_IT": "EUR",
+    "EBAY_DE": "EUR",
+    "EBAY_FR": "EUR",
+    "EBAY_ES": "EUR",
+    "EBAY_AT": "EUR",
+    "EBAY_BE": "EUR",
+    "EBAY_NL": "EUR",
+    "EBAY_CH": "CHF",
+    "EBAY_PL": "PLN",
+}
+
+def _marketplace_currency() -> str:
+    return _MARKETPLACE_CURRENCIES.get(settings.EBAY_MARKETPLACE_ID, "USD")
+
 
 class EbayAdapter(BasePlatformAdapter):
     """
     eBay REST API adapter.
-    Requires a valid OAuth user token with sell.* scopes.
+    Uses per-user token if access_token is passed; otherwise falls back to
+    EBAY_USER_TOKEN / EBAY_PROD_USER_TOKEN from settings.
     """
 
-    def __init__(self):
-        self._sandbox = settings.EBAY_SANDBOX
+    def __init__(
+        self,
+        access_token: Optional[str] = None,
+        marketplace_id: Optional[str] = None,
+        sandbox: Optional[bool] = None,
+    ):
+        self._sandbox = settings.EBAY_SANDBOX if sandbox is None else sandbox
         self._base = EBAY_SANDBOX_BASE if self._sandbox else EBAY_PROD_BASE
-        self._token = settings.EBAY_USER_TOKEN if self._sandbox else settings.EBAY_PROD_USER_TOKEN
+        self._token = access_token
+        if self._token is None:
+            self._token = settings.EBAY_USER_TOKEN if self._sandbox else settings.EBAY_PROD_USER_TOKEN
+        if not (self._token and self._token.strip()):
+            raise ValueError(
+                "eBay token missing. Set EBAY_PROD_USER_TOKEN in .env or connect your account via "
+                "OAuth: open /api/auth/ebay/authorize in the app."
+            )
+        self._marketplace_id = marketplace_id or settings.EBAY_MARKETPLACE_ID
 
     @property
     def platform_name(self) -> str:
@@ -42,7 +75,7 @@ class EbayAdapter(BasePlatformAdapter):
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
             "Content-Language": "en-US",
-            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+            "X-EBAY-C-MARKETPLACE-ID": self._marketplace_id,
         }
 
     async def post_listing(self, draft: ListingDraft) -> PublishedListing:
@@ -91,14 +124,14 @@ class EbayAdapter(BasePlatformAdapter):
                 )
             offer_payload = {
                 "sku": sku,
-                "marketplaceId": "EBAY_US",
+                "marketplaceId": self._marketplace_id,
                 "format": "FIXED_PRICE",
                 "availableQuantity": 1,
                 "categoryId": draft.category_id,
                 "listingDescription": draft.description,
                 "listingPolicies": listing_policies,
                 "pricingSummary": {
-                    "price": {"value": str(draft.price), "currency": "USD"}
+                    "price": {"value": str(draft.price), "currency": _MARKETPLACE_CURRENCIES.get(self._marketplace_id, "USD")}
                 },
             }
             merchant_location_key = draft.extra.get("merchant_location_key") or \
@@ -126,7 +159,25 @@ class EbayAdapter(BasePlatformAdapter):
             resp.raise_for_status()
             listing_id = resp.json()["listingId"]
 
-        base_url = "sandbox.ebay.com" if self._sandbox else "ebay.com"
+        if self._sandbox:
+            base_url = "sandbox.ebay.com"
+        else:
+            marketplace_domains = {
+                "EBAY_US": "ebay.com",
+                "EBAY_IT": "ebay.it",
+                "EBAY_GB": "ebay.co.uk",
+                "EBAY_DE": "ebay.de",
+                "EBAY_FR": "ebay.fr",
+                "EBAY_ES": "ebay.es",
+                "EBAY_AU": "ebay.com.au",
+                "EBAY_CA": "ebay.ca",
+                "EBAY_AT": "ebay.at",
+                "EBAY_BE": "ebay.be",
+                "EBAY_NL": "ebay.nl",
+                "EBAY_CH": "ebay.ch",
+                "EBAY_PL": "ebay.pl",
+            }
+            base_url = marketplace_domains.get(self._marketplace_id, "ebay.com")
         return PublishedListing(
             platform_listing_id=listing_id,
             platform_url=f"https://www.{base_url}/itm/{listing_id}",
@@ -187,7 +238,7 @@ class EbayAdapter(BasePlatformAdapter):
         async with httpx.AsyncClient(base_url=self._base) as client:
             resp = await client.post(
                 f"/sell/negotiation/v1/best_offer/{platform_offer_id}/counter_offer",
-                json={"counterOffer": {"price": {"value": str(amount), "currency": "USD"}}},
+                json={"counterOffer": {"price": {"value": str(amount), "currency": _MARKETPLACE_CURRENCIES.get(self._marketplace_id, "USD")}}},
                 headers=self._headers(),
             )
             return resp.is_success

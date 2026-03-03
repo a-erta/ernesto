@@ -1,5 +1,6 @@
 """
 Publisher Agent — takes approved listing copy and posts to each target platform.
+Uses per-user eBay token (with refresh) when available; otherwise falls back to env.
 """
 import structlog
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 from ..platforms.base import ListingDraft
 from ..platforms.ebay import EbayAdapter
 from ..platforms.vinted import VintedAdapter
+from ..models.db import AsyncSessionLocal
+from ..api.credentials_routes import get_ebay_access_token
+from ..config import settings
 
 log = structlog.get_logger()
 
@@ -63,7 +67,23 @@ async def run_publisher(state: dict[str, Any]) -> dict[str, Any]:
         )
 
         try:
-            adapter = adapter_cls()
+            if platform_name == "ebay":
+                user_id = state.get("user_id")
+                access_token = None
+                if user_id:
+                    async with AsyncSessionLocal() as db:
+                        access_token = await get_ebay_access_token(user_id, db)
+                if access_token:
+                    log.info("publisher.ebay_token", source="user_oauth", user_id=user_id)
+                else:
+                    log.info("publisher.ebay_token", source="env_fallback", user_id=user_id)
+                adapter = EbayAdapter(
+                    access_token=access_token,
+                    marketplace_id=settings.EBAY_MARKETPLACE_ID,
+                    sandbox=settings.EBAY_SANDBOX,
+                )
+            else:
+                adapter = adapter_cls()
             result = await adapter.post_listing(draft)
             published.append({
                 "platform": platform_name,

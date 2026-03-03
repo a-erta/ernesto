@@ -65,6 +65,9 @@ class EbayCredentials(BaseModel):
     cert_id: str = ""
     dev_id: str = ""
     is_sandbox: bool = True
+    # OAuth: set when user connects via /api/auth/ebay/authorize; used to refresh access token
+    refresh_token: str | None = None
+    expires_at: float | None = None  # Unix timestamp when user_token expires
 
 
 class VintedCredentials(BaseModel):
@@ -174,6 +177,55 @@ async def delete_credentials(
     await db.delete(cred)
     await db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# eBay: get valid access token (refresh if needed)
+# ---------------------------------------------------------------------------
+
+REFRESH_BUFFER_SECONDS = 300  # refresh if expires in less than 5 minutes
+
+
+async def get_ebay_access_token(user_id: str, db: AsyncSession) -> str | None:
+    """
+    Load eBay credentials for the user. If they have a refresh_token and the
+    access token is expired (or within 5 min), refresh and persist. Return
+    the access token to use, or None if no credentials.
+    """
+    creds_dict = await get_platform_credentials(user_id, "ebay", db)
+    if not creds_dict:
+        return None
+    access = creds_dict.get("user_token")
+    refresh = creds_dict.get("refresh_token")
+    expires_at = creds_dict.get("expires_at")
+    is_sandbox = creds_dict.get("is_sandbox", True)
+
+    if refresh and (expires_at is None or (expires_at - REFRESH_BUFFER_SECONDS) < datetime.now(timezone.utc).timestamp()):
+        try:
+            from ..ebay_oauth import refresh_access_token
+            token_data = await refresh_access_token(refresh, sandbox=is_sandbox)
+            new_access = token_data["access_token"]
+            new_refresh = token_data.get("refresh_token") or refresh
+            new_expires = datetime.now(timezone.utc).timestamp() + token_data.get("expires_in", 7200)
+            creds_dict["user_token"] = new_access
+            creds_dict["refresh_token"] = new_refresh
+            creds_dict["expires_at"] = new_expires
+            encrypted = _encrypt(creds_dict)
+            result = await db.execute(
+                select(DBPlatformCredential).where(
+                    DBPlatformCredential.user_id == user_id,
+                    DBPlatformCredential.platform == "ebay",
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                row.credentials_enc = encrypted
+                row.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+            access = new_access
+        except Exception as e:
+            log.warning("credentials.ebay_refresh_failed", user_id=user_id, error=str(e))
+    return access
 
 
 # ---------------------------------------------------------------------------

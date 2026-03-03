@@ -49,7 +49,17 @@ class Settings(BaseSettings):
     EBAY_PROD_DEV_ID: str = ""
     EBAY_PROD_USER_TOKEN: str = ""
 
+    # --- eBay marketplace (EBAY_US, EBAY_IT, EBAY_GB, EBAY_DE, EBAY_FR, EBAY_ES, ...) ---
+    EBAY_MARKETPLACE_ID: str = "EBAY_US"
+
+    # --- eBay OAuth (for per-user tokens; optional) ---
+    # Must match "Your auth accepted URL" in eBay Developer Portal → Get a Token → OAuth.
+    EBAY_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/ebay/callback"
+    # Space-separated OAuth scopes, e.g. "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
+    EBAY_OAUTH_SCOPES: str = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.negotiation"
+
     # --- eBay listing policies (set after running test_ebay.py --prod) ---
+    # Policies are marketplace-specific — run test_ebay.py for each marketplace you use.
     EBAY_FULFILLMENT_POLICY_ID: str = ""
     EBAY_PAYMENT_POLICY_ID: str = ""
     EBAY_RETURN_POLICY_ID: str = ""

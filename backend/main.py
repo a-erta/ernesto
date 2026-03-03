@@ -11,6 +11,7 @@ from .api.routes import router
 from .api.websocket import ws_router
 from .api.credentials_routes import creds_router
 from .api.device_routes import device_router
+from .api.ebay_auth_routes import router as ebay_auth_router
 
 log = structlog.get_logger()
 
@@ -44,6 +45,7 @@ app.include_router(router)
 app.include_router(ws_router)
 app.include_router(creds_router)
 app.include_router(device_router)
+app.include_router(ebay_auth_router)
 
 # Serve uploaded images locally (skipped when S3 is active)
 if not settings.use_s3:

@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { Tag, Github, LogOut } from "lucide-react";
+import { Tag, Github, LogOut, Link2 } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { ItemDetail } from "./pages/ItemDetail";
 import { Login } from "./pages/Login";
@@ -21,6 +21,14 @@ function Layout({ children }: { children: React.ReactNode }) {
             <span className="text-xs font-normal text-slate-500 ml-1">v0.1</span>
           </a>
           <div className="flex items-center gap-3">
+            <a
+              href="/api/auth/ebay/authorize"
+              className="text-slate-500 hover:text-amber-400 transition-colors flex items-center gap-1.5 text-sm"
+              title="Connect your eBay account (OAuth)"
+            >
+              <Link2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Connect eBay</span>
+            </a>
             {user && (
               <span className="text-xs text-slate-500 hidden sm:block truncate max-w-[160px]">
                 {user.email}

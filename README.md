@@ -304,39 +304,80 @@ Full interactive docs at http://localhost:8000/docs when the backend is running.
 
 ---
 
-## Deployment — Render (recommended, simple)
+## Deployment — Render (Docker, HTTPS for eBay OAuth)
 
-`render.yaml` in the repo root defines the full infrastructure as a Blueprint:
-- **ernesto-api** — Docker web service (the FastAPI backend)
-- **ernesto-db** — PostgreSQL database
-- **ernesto-redis** — Redis (for WebSocket pub/sub)
+Render is a good fit: it runs your **Docker** image, gives you **HTTPS** out of the box (so eBay accepts the OAuth callback URL), and the repo already has a Blueprint.
 
-### Steps
+`render.yaml` defines:
+- **ernesto-api** — Web Service with **Docker** (FastAPI backend)
+- **ernesto-db** — PostgreSQL
+- **ernesto-redis** — Redis
 
-1. Push your code to GitHub (make sure `render.yaml` is committed).
-2. Go to https://dashboard.render.com → **New → Blueprint**.
-3. Connect your GitHub repo — Render reads `render.yaml` automatically.
-4. In the environment variable screen, fill in the secrets marked `sync: false`:
+### 1. Push to GitHub
 
-| Variable | Value |
-|---|---|
-| `OPENAI_API_KEY` | Your OpenAI key |
-| `CORS_ORIGINS` | Your frontend URL, e.g. `https://ernesto.onrender.com` |
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_JWT_SECRET` | Supabase dashboard → Settings → API → JWT Secret |
-| `FERNET_KEY` | Run: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
-| `EBAY_APP_ID` / `EBAY_CERT_ID` / `EBAY_USER_TOKEN` | eBay developer credentials (optional) |
-| `S3_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Only if you want S3 image storage (optional) |
+Commit and push your repo (including `render.yaml` and `Dockerfile`).
 
-5. Click **Apply** — Render provisions everything and deploys automatically.
+### 2. Create the Blueprint on Render
 
-`DATABASE_URL` and `REDIS_URL` are wired up automatically from the other services — you don't set those manually.
+1. Go to **https://dashboard.render.com** → **New → Blueprint**.
+2. Connect the GitHub account/repo that contains Ernesto.
+3. Select the repo. Render will detect `render.yaml` and list the services (ernesto-api, ernesto-db, ernesto-redis).
+4. Click **Apply** (you can leave env vars for the next step).
 
-> **Free tier note:** Render's free web services spin down after 15 minutes of inactivity (cold start ~30s). Upgrade to the Starter plan ($7/mo) for always-on.
+### 3. Set environment variables
+
+In the Render dashboard, open the **ernesto-api** service → **Environment** and set every variable that is `sync: false` in the Blueprint. At minimum:
+
+| Variable | What to set |
+|----------|----------------------|
+| `OPENAI_API_KEY` | Your OpenAI API key |
+| `SECRET_KEY` | (Optional — Render can auto-generate; or set your own long random string) |
+| `CORS_ORIGINS` | Frontend origin(s), e.g. `https://your-frontend.onrender.com` or `http://localhost:5173` for local dev |
+| `SUPABASE_URL` | Supabase project URL (if using auth) |
+| `SUPABASE_JWT_SECRET` | From Supabase → Settings → API (if using auth) |
+| `FERNET_KEY` | Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `EBAY_PROD_APP_ID` | eBay production app ID |
+| `EBAY_PROD_CERT_ID` | eBay production cert ID |
+| `EBAY_OAUTH_REDIRECT_URI` | **Set after first deploy** (see step 4) |
+| `EBAY_FULFILLMENT_POLICY_ID` / `EBAY_PAYMENT_POLICY_ID` / `EBAY_RETURN_POLICY_ID` | From `python test_ebay.py --prod` (optional if using OAuth only) |
+
+`DATABASE_URL` and `REDIS_URL` are filled automatically from the PostgreSQL and Redis services.
+
+### 4. First deploy and eBay OAuth URL
+
+1. Trigger a deploy (or wait for the first one to finish).
+2. In the **ernesto-api** service, copy the **URL** (e.g. `https://ernesto-api-xxxx.onrender.com`).
+3. Set the OAuth callback URL:
+   - In **Render** → ernesto-api → **Environment**:  
+     `EBAY_OAUTH_REDIRECT_URI` = `https://ernesto-api-xxxx.onrender.com/api/auth/ebay/callback`  
+     (replace with your actual URL.)
+   - In **eBay Developer Portal** → Your app → **Get a Token** → **Your auth accepted URL**:  
+     same value: `https://ernesto-api-xxxx.onrender.com/api/auth/ebay/callback`  
+   - **Your auth declined URL**: e.g. `https://ernesto-api-xxxx.onrender.com/` or your frontend URL.
+4. Save and redeploy if you changed env vars.
+
+After that, “Connect eBay” in the app will use HTTPS and satisfy eBay’s requirement.
+
+### 5. Frontend (optional)
+
+- **Option A:** Keep running the frontend locally (`npm run dev`) and set `CORS_ORIGINS=http://localhost:5173` so it can call the Render API.
+- **Option B:** Deploy the frontend as a **Static Site** on Render (build command: `npm run build`, publish directory: `dist`), then set `CORS_ORIGINS` to that site’s URL (e.g. `https://ernesto.onrender.com`).
+
+### Summary
+
+| Step | Action |
+|------|--------|
+| 1 | Push repo (with `render.yaml`, `Dockerfile`) to GitHub |
+| 2 | Render → New → Blueprint → connect repo → Apply |
+| 3 | Set env vars for ernesto-api (OPENAI_API_KEY, FERNET_KEY, CORS_ORIGINS, eBay, etc.) |
+| 4 | After deploy, set `EBAY_OAUTH_REDIRECT_URI` and the same URL in eBay Developer Portal |
+| 5 | (Optional) Deploy frontend as Static Site or use local frontend with CORS |
+
+> **Free tier:** Web services spin down after ~15 min idle (cold start ~30s). Starter plan ($7/mo) keeps the API always on.
 
 ### Subsequent deploys
 
-Every push to `main` triggers an automatic redeploy on Render. No extra CI/CD setup needed.
+Push to the branch connected to the Blueprint (usually `main`); Render redeploys the Docker image automatically.
 
 ---
 

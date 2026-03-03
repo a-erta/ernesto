@@ -73,7 +73,7 @@ services:
         generateValue: false   # generate manually: see README
         sync: false
 
-      # --- eBay ---
+      # --- eBay (env token fallback; prefer OAuth per user) ---
       - key: EBAY_APP_ID
         sync: false
       - key: EBAY_CERT_ID
@@ -83,7 +83,28 @@ services:
       - key: EBAY_USER_TOKEN
         sync: false
       - key: EBAY_SANDBOX
-        value: "true"
+        value: "false"
+      - key: EBAY_PROD_APP_ID
+        sync: false
+      - key: EBAY_PROD_CERT_ID
+        sync: false
+      - key: EBAY_PROD_DEV_ID
+        sync: false
+      - key: EBAY_PROD_USER_TOKEN
+        sync: false
+      - key: EBAY_MARKETPLACE_ID
+        value: "EBAY_US"
+      - key: EBAY_FULFILLMENT_POLICY_ID
+        sync: false
+      - key: EBAY_PAYMENT_POLICY_ID
+        sync: false
+      - key: EBAY_RETURN_POLICY_ID
+        sync: false
+      - key: EBAY_MERCHANT_LOCATION_KEY
+        sync: false
+      # --- eBay OAuth (must be https://your-api.onrender.com/api/auth/ebay/callback) ---
+      - key: EBAY_OAUTH_REDIRECT_URI
+        sync: false
 
   # ------------------------------------------------------------------
   # PostgreSQL

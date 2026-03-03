@@ -2,9 +2,10 @@
 eBay diagnostic script — works for both sandbox and production.
 
 Usage (from the ernesto/ directory, venv active):
-    python test_ebay.py            # uses EBAY_SANDBOX setting from .env
-    python test_ebay.py --prod     # force production mode
-    python test_ebay.py --sandbox  # force sandbox mode
+    python test_ebay.py                          # uses settings from .env
+    python test_ebay.py --prod                   # force production mode
+    python test_ebay.py --sandbox                # force sandbox mode
+    python test_ebay.py --prod --marketplace EBAY_IT   # production, Italian site
 
 ⚠️  PRODUCTION WARNING: this script will create a REAL listing on eBay.
     It will ask for confirmation before publishing and offers a cleanup option.
@@ -29,6 +30,13 @@ elif "--sandbox" in sys.argv:
 else:
     PRODUCTION = not settings.EBAY_SANDBOX
 
+# --marketplace EBAY_IT  (or any other marketplace ID)
+if "--marketplace" in sys.argv:
+    idx = sys.argv.index("--marketplace")
+    MARKETPLACE_ID = sys.argv[idx + 1]
+else:
+    MARKETPLACE_ID = settings.EBAY_MARKETPLACE_ID
+
 BASE = "https://api.ebay.com" if PRODUCTION else "https://api.sandbox.ebay.com"
 TOKEN = settings.EBAY_PROD_USER_TOKEN if PRODUCTION else settings.EBAY_USER_TOKEN
 APP_ID = settings.EBAY_PROD_APP_ID if PRODUCTION else settings.EBAY_APP_ID
@@ -38,8 +46,71 @@ HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Content-Type": "application/json",
     "Content-Language": "en-US",
-    "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE_ID,
 }
+
+# ── marketplace-specific shipping config ─────────────────────────────────────
+
+MARKETPLACE_SHIPPING = {
+    "EBAY_US": {
+        "currency": "USD",
+        "service": "USPSFirstClass",
+        "cost": "4.99",
+    },
+    "EBAY_IT": {
+        "currency": "EUR",
+        "service": "IT_Poste_PaccoPronto",
+        "cost": "5.90",
+    },
+    "EBAY_GB": {
+        "currency": "GBP",
+        "service": "UK_RoyalMailSecondClassStandard",
+        "cost": "3.99",
+    },
+    "EBAY_DE": {
+        "currency": "EUR",
+        "service": "DE_DHLPaket",
+        "cost": "5.99",
+    },
+    "EBAY_FR": {
+        "currency": "EUR",
+        "service": "FR_Chronopost",
+        "cost": "6.99",
+    },
+    "EBAY_ES": {
+        "currency": "EUR",
+        "service": "ES_Correos",
+        "cost": "4.99",
+    },
+}
+
+def _shipping_config():
+    return MARKETPLACE_SHIPPING.get(MARKETPLACE_ID, MARKETPLACE_SHIPPING["EBAY_US"])
+
+def _fulfillment_policy_body():
+    s = _shipping_config()
+    return {
+        "name": "ernesto-fulfillment",
+        "marketplaceId": MARKETPLACE_ID,
+        "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
+        "handlingTime": {"value": 3, "unit": "DAY"},
+        "globalShipping": False,
+        "pickupDropOff": False,
+        "freightShipping": False,
+        "shipToLocations": {
+            "regionIncluded": [{"regionName": "Worldwide"}],
+        },
+        "shippingOptions": [{
+            "optionType": "DOMESTIC",
+            "costType": "FLAT_RATE",
+            "shippingServices": [{
+                "shippingServiceCode": s["service"],
+                "shippingCost": {"value": s["cost"], "currency": s["currency"]},
+                "freeShipping": False,
+                "buyerResponsibleForShipping": False,
+            }],
+        }],
+    }
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -63,9 +134,10 @@ def show(label: str, resp: httpx.Response):
 
 async def check_token():
     section("STEP 0 — Token & seller registration check")
-    print(f"\n   Mode     : {'🔴 PRODUCTION' if PRODUCTION else '🟡 SANDBOX'}")
-    print(f"   Base URL : {BASE}")
-    print(f"   Token    : {TOKEN[:40]}...")
+    print(f"\n   Mode        : {'🔴 PRODUCTION' if PRODUCTION else '🟡 SANDBOX'}")
+    print(f"   Marketplace : {MARKETPLACE_ID}")
+    print(f"   Base URL    : {BASE}")
+    print(f"   Token       : {TOKEN[:40]}...")
     print(f"   Length   : {len(TOKEN)} chars")
 
     if len(TOKEN) < 200:
@@ -141,7 +213,7 @@ async def get_or_create_policies() -> dict:
         # Try GET first (works on production, broken on sandbox)
         resp = await c.get(
             "/sell/account/v1/fulfillment_policy",
-            params={"marketplace_id": "EBAY_US"},
+            params={"marketplace_id": MARKETPLACE_ID},
             headers=HEADERS,
         )
         if resp.is_success and resp.json().get("fulfillmentPolicies"):
@@ -149,25 +221,8 @@ async def get_or_create_policies() -> dict:
             print(f"\n   ✔ fulfillmentPolicyId : {ids['fulfillmentPolicyId']}")
         else:
             print("\n   → Creating fulfillment policy...")
-            r = await c.post("/sell/account/v1/fulfillment_policy", headers=HEADERS, json={
-                "name": "ernesto-fulfillment",
-                "marketplaceId": "EBAY_US",
-                "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
-                "handlingTime": {"value": 3, "unit": "DAY"},
-                "shipToLocations": {
-                    "regionIncluded": [{"regionName": "Worldwide"}],
-                },
-                "shippingOptions": [{
-                    "optionType": "DOMESTIC",
-                    "costType": "FLAT_RATE",
-                    "shippingServices": [{
-                        "shippingServiceCode": "USPSFirstClass",
-                        "shippingCost": {"value": "4.99", "currency": "USD"},
-                        "freeShipping": False,
-                        "buyerResponsibleForShipping": False,
-                    }],
-                }],
-            })
+            r = await c.post("/sell/account/v1/fulfillment_policy", headers=HEADERS,
+                             json=_fulfillment_policy_body())
             show("POST fulfillment_policy", r)
             if r.is_success:
                 ids["fulfillmentPolicyId"] = r.json()["fulfillmentPolicyId"]
@@ -179,7 +234,7 @@ async def get_or_create_policies() -> dict:
 
         resp = await c.get(
             "/sell/account/v1/payment_policy",
-            params={"marketplace_id": "EBAY_US"},
+            params={"marketplace_id": MARKETPLACE_ID},
             headers=HEADERS,
         )
         if resp.is_success and resp.json().get("paymentPolicies"):
@@ -189,7 +244,7 @@ async def get_or_create_policies() -> dict:
             print("\n   → Creating payment policy...")
             r = await c.post("/sell/account/v1/payment_policy", headers=HEADERS, json={
                 "name": "ernesto-payment",
-                "marketplaceId": "EBAY_US",
+                "marketplaceId": MARKETPLACE_ID,
                 "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
                 "immediatePay": True,
             })
@@ -204,7 +259,7 @@ async def get_or_create_policies() -> dict:
 
         resp = await c.get(
             "/sell/account/v1/return_policy",
-            params={"marketplace_id": "EBAY_US"},
+            params={"marketplace_id": MARKETPLACE_ID},
             headers=HEADERS,
         )
         if resp.is_success and resp.json().get("returnPolicies"):
@@ -214,7 +269,7 @@ async def get_or_create_policies() -> dict:
             print("\n   → Creating return policy...")
             r = await c.post("/sell/account/v1/return_policy", headers=HEADERS, json={
                 "name": "ernesto-returns",
-                "marketplaceId": "EBAY_US",
+                "marketplaceId": MARKETPLACE_ID,
                 "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
                 "returnsAccepted": True,
                 "returnPeriod": {"value": 30, "unit": "DAY"},
@@ -234,28 +289,8 @@ async def get_or_create_policies() -> dict:
         if "fulfillmentPolicyId" in ids:
             fid = ids["fulfillmentPolicyId"]
             print(f"\n   → Patching fulfillment policy {fid} with shipToLocations...")
-            r = await c.put(f"/sell/account/v1/fulfillment_policy/{fid}", headers=HEADERS, json={
-                "name": "ernesto-fulfillment",
-                "marketplaceId": "EBAY_US",
-                "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
-                "handlingTime": {"value": 3, "unit": "DAY"},
-                "globalShipping": False,
-                "pickupDropOff": False,
-                "freightShipping": False,
-                "shipToLocations": {
-                    "regionIncluded": [{"regionName": "Worldwide"}],
-                },
-                "shippingOptions": [{
-                    "optionType": "DOMESTIC",
-                    "costType": "FLAT_RATE",
-                    "shippingServices": [{
-                        "shippingServiceCode": "USPSFirstClass",
-                        "shippingCost": {"value": "4.99", "currency": "USD"},
-                        "freeShipping": False,
-                        "buyerResponsibleForShipping": False,
-                    }],
-                }],
-            })
+            r = await c.put(f"/sell/account/v1/fulfillment_policy/{fid}", headers=HEADERS,
+                            json=_fulfillment_policy_body())
             if r.is_success:
                 print(f"   ✔ Fulfillment policy updated.")
             else:
@@ -357,7 +392,7 @@ async def create_offer(sku: str, policy_ids: dict, location_key: str | None = No
             "returnPolicyId": policy_ids["returnPolicyId"],
         },
         "pricingSummary": {
-            "price": {"value": price, "currency": "USD"}
+            "price": {"value": price, "currency": _shipping_config()["currency"]}
         },
     }
     if location_key:
@@ -510,7 +545,8 @@ async def main():
 
     # Save policy IDs for use in .env
     section("RESULT — Save these to backend/.env")
-    print(f"\n   EBAY_FULFILLMENT_POLICY_ID={policy_ids['fulfillmentPolicyId']}")
+    print(f"\n   EBAY_MARKETPLACE_ID={MARKETPLACE_ID}")
+    print(f"   EBAY_FULFILLMENT_POLICY_ID={policy_ids['fulfillmentPolicyId']}")
     print(f"   EBAY_PAYMENT_POLICY_ID={policy_ids['paymentPolicyId']}")
     print(f"   EBAY_RETURN_POLICY_ID={policy_ids['returnPolicyId']}")
     print(f"   EBAY_LISTING_ID (test)={listing_id}")
