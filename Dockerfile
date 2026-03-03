@@ -1,5 +1,6 @@
 # ---- Build stage: install Python deps ----
-FROM python:3.12-slim AS builder
+# Pin to Bookworm: Playwright --with-deps expects Debian 12 package names (ttf-unifont etc.)
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -16,7 +17,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
     cryptography
 
 # ---- Runtime stage ----
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 WORKDIR /app
 
