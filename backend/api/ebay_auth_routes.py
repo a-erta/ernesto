@@ -92,6 +92,15 @@ async def ebay_callback(
         sandbox=sandbox,
     )
     if not code or not state:
+        if code and not state:
+            log.warning(
+                "ebay_callback.missing_state",
+                detail="Got code but no state. Use 'Connect eBay' from the app (not Test Sign-In from the portal).",
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Missing state. Use 'Connect eBay' in the Ernesto app to link your eBay account (do not use Test Sign-In from the eBay portal).",
+            )
         log.warning("ebay_callback.missing_params", detail="code and state required from eBay redirect")
         raise HTTPException(
             status_code=400,
