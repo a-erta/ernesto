@@ -11,8 +11,11 @@ export function useItemSocket(
 
   const connect = useCallback(() => {
     if (!itemId) return;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/${itemId}`);
+    const apiUrl = import.meta.env.VITE_API_URL;
+    const origin = apiUrl ? new URL(apiUrl).origin : window.location.origin;
+    const protocol = origin.startsWith("https") ? "wss" : "ws";
+    const host = apiUrl ? new URL(apiUrl).host : window.location.host;
+    const ws = new WebSocket(`${protocol}://${host}/ws/${itemId}`);
 
     ws.onmessage = (e) => {
       try {

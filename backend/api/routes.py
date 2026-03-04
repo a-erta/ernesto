@@ -45,7 +45,7 @@ def _get_checkpointer():
     """Return the appropriate LangGraph checkpointer based on DATABASE_URL."""
     if settings.use_postgres:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
-        return AsyncPostgresSaver.from_conn_string(settings.DATABASE_URL)
+        return AsyncPostgresSaver.from_conn_string(settings.database_url_async)
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     return AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB)
 
@@ -54,7 +54,8 @@ async def _ensure_user(user: AuthUser, db: AsyncSession):
     """Upsert the authenticated user into the users table."""
     existing = await db.get(DBUser, user.user_id)
     if not existing:
-        db.add(DBUser(id=user.user_id, email=user.email))
+        email = (user.email or "").strip() or f"_{user.user_id}"  # unique fallback when JWT has no email
+        db.add(DBUser(id=user.user_id, email=email))
         await db.commit()
 
 

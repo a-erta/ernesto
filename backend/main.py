@@ -1,7 +1,9 @@
+import traceback
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -40,6 +42,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def root():
+    """API is up. Use /docs for interactive docs."""
+    return {"service": "ernesto", "docs": "/docs", "health": "ok"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """No favicon; avoid 404 in logs when browser requests it."""
+    return Response(status_code=204)
+
+
+@app.exception_handler(Exception)
+async def log_unhandled_exception(request: Request, exc: Exception):
+    """Log full traceback for 500s so Render logs show the cause."""
+    log.error(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        traceback=traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "error": str(exc)},
+    )
+
 
 app.include_router(router)
 app.include_router(ws_router)

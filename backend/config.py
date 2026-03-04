@@ -4,7 +4,8 @@ from typing import List
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=["backend/.env", ".env"],  # works from project root or backend/
+        # Local dev; then Render Secret File (Dashboard → Secret Files) mounted at /etc/secrets/
+        env_file=["backend/.env", ".env", "/etc/secrets/.env"],
         extra="ignore",
     )
 
@@ -76,6 +77,14 @@ class Settings(BaseSettings):
     @property
     def use_postgres(self) -> bool:
         return self.DATABASE_URL.startswith("postgresql")
+
+    @property
+    def database_url_async(self) -> str:
+        """DATABASE_URL with async driver. Render gives postgresql://; we need postgresql+asyncpg://."""
+        u = self.DATABASE_URL
+        if u.startswith("postgresql://") and "+asyncpg" not in u:
+            return "postgresql+asyncpg://" + u.split("://", 1)[1]
+        return u
 
     @property
     def use_s3(self) -> bool:

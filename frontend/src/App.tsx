@@ -5,6 +5,8 @@ import { ItemDetail } from "./pages/ItemDetail";
 import { Login } from "./pages/Login";
 import { useAuth } from "./context/AuthContext";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { getBackendOrigin } from "./lib/api";
+import { BackendStatus } from "./components/BackendStatus";
 
 function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -21,8 +23,9 @@ function Layout({ children }: { children: React.ReactNode }) {
             <span className="text-xs font-normal text-slate-500 ml-1">v0.1</span>
           </a>
           <div className="flex items-center gap-3">
+            <BackendStatus />
             <a
-              href="/api/auth/ebay/authorize"
+              href={`${getBackendOrigin()}/api/auth/ebay/authorize`}
               className="text-slate-500 hover:text-amber-400 transition-colors flex items-center gap-1.5 text-sm"
               title="Connect your eBay account (OAuth)"
             >
