@@ -118,13 +118,20 @@ async def exchange_code(
     Exchange authorization code for access_token and refresh_token.
     Returns dict with access_token, refresh_token, expires_in (seconds).
     """
-    redirect_uri = redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI
+    redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
     cert_id = settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID
     raw = f"{client_id}:{cert_id}"
     basic = base64.b64encode(raw.encode()).decode()
 
+    log.info(
+        "ebay_oauth.exchange_code",
+        token_url=url,
+        redirect_uri_len=len(redirect_uri),
+        code_len=len(code),
+        sandbox=sandbox,
+    )
     async with httpx.AsyncClient() as client:
         r = await client.post(
             url,
@@ -138,8 +145,20 @@ async def exchange_code(
                 "redirect_uri": redirect_uri,
             },
         )
+    if not r.is_success:
+        try:
+            err_body = r.json()
+        except Exception:
+            err_body = r.text[:500]
+        log.error(
+            "ebay_oauth.exchange_code.failed",
+            status=r.status_code,
+            response=err_body,
+            sandbox=sandbox,
+        )
     r.raise_for_status()
     data = r.json()
+    log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox)
     return {
         "access_token": data["access_token"],
         "refresh_token": data.get("refresh_token"),

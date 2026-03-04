@@ -26,6 +26,12 @@ from .credentials_routes import _encrypt
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _mask(s: str, show: int = 6) -> str:
+    if not s or len(s) <= show:
+        return "***"
+    return s[:show] + "..." + s[-2:] if len(s) > show + 2 else s[:show] + "***"
+
+
 @router.get("/ebay/authorize")
 async def ebay_authorize(
     request: Request,
@@ -39,9 +45,23 @@ async def ebay_authorize(
     When the client sends Accept: application/json (e.g. from fetch with auth),
     returns {"url": "..."} so the frontend can redirect after attaching the token.
     """
+    runame = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
+    client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    log.info(
+        "ebay_authorize.start",
+        user_id=current_user.user_id,
+        sandbox=sandbox,
+        runame=runame[:20] + "..." if len(runame) > 20 else runame,
+        client_id_mask=_mask(client_id),
+    )
     url = get_authorize_url(
         user_id=current_user.user_id,
         sandbox=sandbox,
+    )
+    log.info(
+        "ebay_authorize.redirect",
+        auth_host="auth.sandbox.ebay.com" if sandbox else "auth.ebay.com",
+        url_len=len(url),
     )
     from fastapi.responses import RedirectResponse, JSONResponse
     if "application/json" in (request.headers.get("accept") or "").lower():
@@ -51,8 +71,9 @@ async def ebay_authorize(
 
 @router.get("/ebay/callback")
 async def ebay_callback(
-    code: str = Query(..., description="Authorization code from eBay"),
-    state: str = Query(..., description="State we sent in authorize"),
+    request: Request,
+    code: str | None = Query(None, description="Authorization code from eBay"),
+    state: str | None = Query(None, description="State we sent in authorize"),
     sandbox: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -60,11 +81,34 @@ async def ebay_callback(
     eBay redirects here after the user approves. We exchange the code for
     access_token + refresh_token and store them. user_id comes from signed state.
     """
+    q = dict(request.query_params)
+    log.info(
+        "ebay_callback.hit",
+        query_keys=list(q.keys()),
+        has_code=bool(code),
+        has_state=bool(state),
+        code_len=len(code) if code else 0,
+        state_len=len(state) if state else 0,
+        sandbox=sandbox,
+    )
+    if not code or not state:
+        log.warning("ebay_callback.missing_params", detail="code and state required from eBay redirect")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing code or state. eBay should redirect here with ?code=...&state=... after the user approves.",
+        )
+
     user_id = verify_state(state)
     if not user_id:
+        log.warning("ebay_callback.state_invalid", state_len=len(state))
         raise HTTPException(status_code=400, detail="Invalid or expired state")
+    log.info("ebay_callback.state_ok", user_id=user_id)
 
-    token_data = await exchange_code(code=code, sandbox=sandbox)
+    try:
+        token_data = await exchange_code(code=code, sandbox=sandbox)
+    except Exception as e:
+        log.error("ebay_callback.exchange_failed", error=str(e), sandbox=sandbox)
+        raise
     expires_in = token_data.get("expires_in", 7200)
     expires_at = datetime.now(timezone.utc).timestamp() + expires_in
 
@@ -103,5 +147,7 @@ async def ebay_callback(
 
     # Redirect to frontend so the app can close the popup and show "eBay connected"
     frontend_origin = settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:5173"
+    redirect_to = f"{frontend_origin.rstrip('/')}/?ebay_connected=1"
+    log.info("ebay_callback.redirect_to_frontend", frontend_origin=frontend_origin, redirect_url=redirect_to)
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=f"{frontend_origin.rstrip('/')}/?ebay_connected=1", status_code=302)
+    return RedirectResponse(url=redirect_to, status_code=302)
