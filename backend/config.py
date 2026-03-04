@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # --- eBay sandbox ---
     EBAY_APP_ID: str = ""
     EBAY_CERT_ID: str = ""
+    EBAY_CLIENT_SECRET: str = ""  # OAuth token exchange uses App ID:Client Secret (not Cert ID)
     EBAY_DEV_ID: str = ""
     EBAY_USER_TOKEN: str = ""
     EBAY_SANDBOX: bool = True
@@ -54,6 +55,7 @@ class Settings(BaseSettings):
     # --- eBay production ---
     EBAY_PROD_APP_ID: str = ""
     EBAY_PROD_CERT_ID: str = ""
+    EBAY_PROD_CLIENT_SECRET: str = ""  # OAuth token exchange uses App ID:Client Secret (not Cert ID)
     EBAY_PROD_DEV_ID: str = ""
     EBAY_PROD_USER_TOKEN: str = ""
 

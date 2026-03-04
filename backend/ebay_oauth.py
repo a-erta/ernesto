@@ -121,8 +121,13 @@ async def exchange_code(
     redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
-    cert_id = settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID
-    raw = f"{client_id}:{cert_id}"
+    client_secret = settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET
+    if not (client_secret and client_secret.strip()):
+        raise ValueError(
+            "eBay Client Secret required for OAuth token exchange. Set EBAY_PROD_CLIENT_SECRET (or EBAY_CLIENT_SECRET for sandbox). "
+            "Find it in Developer Portal → Application Keys → (Production) → Client Secret."
+        )
+    raw = f"{client_id}:{client_secret}"
     basic = base64.b64encode(raw.encode()).decode()
 
     log.info(
@@ -176,8 +181,10 @@ async def refresh_access_token(
     """
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
-    cert_id = settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID
-    raw = f"{client_id}:{cert_id}"
+    client_secret = settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET
+    if not (client_secret and client_secret.strip()):
+        raise ValueError("EBAY_PROD_CLIENT_SECRET (or EBAY_CLIENT_SECRET for sandbox) required for token refresh.")
+    raw = f"{client_id}:{client_secret}"
     basic = base64.b64encode(raw.encode()).decode()
 
     async with httpx.AsyncClient() as client:

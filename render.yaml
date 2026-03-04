@@ -96,6 +96,8 @@ services:
         sync: false
       - key: EBAY_PROD_CERT_ID
         sync: false
+      - key: EBAY_PROD_CLIENT_SECRET
+        sync: false
       - key: EBAY_PROD_DEV_ID
         sync: false
       - key: EBAY_PROD_USER_TOKEN
