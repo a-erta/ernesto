@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Tag, Github, LogOut, Link2 } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
@@ -7,6 +8,56 @@ import { useAuth } from "./context/AuthContext";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { getBackendOrigin } from "./lib/api";
 import { BackendStatus } from "./components/BackendStatus";
+import { api } from "./lib/api";
+
+function ConnectEbayButton() {
+  const { session } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    setError(null);
+    if (!isSupabaseConfigured) {
+      window.location.href = `${getBackendOrigin()}/api/auth/ebay/authorize`;
+      return;
+    }
+    if (!session?.access_token) {
+      setError("Please log in to connect eBay");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await api.get<{ url: string }>("/auth/ebay/authorize", {
+        headers: { Accept: "application/json" },
+      });
+      if (data?.url) window.location.href = data.url;
+      else setError("Could not get eBay authorization URL");
+    } catch (e: unknown) {
+      const msg = e && typeof e === "object" && "response" in e
+        ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        : null;
+      setError(msg || "Failed to start eBay connection");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleConnect}
+      disabled={loading}
+      className="text-slate-500 hover:text-amber-400 transition-colors flex items-center gap-1.5 text-sm disabled:opacity-50"
+      title={error || "Connect your eBay account (OAuth)"}
+    >
+      <Link2 className="w-4 h-4 shrink-0" />
+      <span className="hidden sm:inline">
+        {loading ? "Redirecting…" : "Connect eBay"}
+      </span>
+      {error && <span className="text-amber-400 text-xs">({error})</span>}
+    </button>
+  );
+}
 
 function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -24,14 +75,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           </a>
           <div className="flex items-center gap-3">
             <BackendStatus />
-            <a
-              href={`${getBackendOrigin()}/api/auth/ebay/authorize`}
-              className="text-slate-500 hover:text-amber-400 transition-colors flex items-center gap-1.5 text-sm"
-              title="Connect your eBay account (OAuth)"
-            >
-              <Link2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Connect eBay</span>
-            </a>
+            <ConnectEbayButton />
             {user && (
               <span className="text-xs text-slate-500 hidden sm:block truncate max-w-[160px]">
                 {user.email}

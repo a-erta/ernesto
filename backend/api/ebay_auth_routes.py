@@ -4,7 +4,7 @@ Each user gets their own token; refresh is used automatically when publishing.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,18 +25,24 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/ebay/authorize")
 async def ebay_authorize(
+    request: Request,
     sandbox: bool = Query(False),
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
     Redirect the user to eBay sign-in. After they approve, eBay redirects back
     to EBAY_OAUTH_REDIRECT_URI with ?code=...&state=...
+
+    When the client sends Accept: application/json (e.g. from fetch with auth),
+    returns {"url": "..."} so the frontend can redirect after attaching the token.
     """
     url = get_authorize_url(
         user_id=current_user.user_id,
         sandbox=sandbox,
     )
-    from fastapi.responses import RedirectResponse
+    from fastapi.responses import RedirectResponse, JSONResponse
+    if "application/json" in (request.headers.get("accept") or "").lower():
+        return JSONResponse(content={"url": url})
     return RedirectResponse(url=url, status_code=302)
 
 

@@ -2,7 +2,7 @@
 Storage abstraction.
 
 If S3_BUCKET is set: uploads go to S3, URLs served via CloudFront.
-Otherwise: falls back to local ./uploads/ directory (local dev).
+Otherwise: falls back to local UPLOAD_DIR (default ./uploads; on Render use persistent disk path).
 """
 import uuid
 import shutil
@@ -16,8 +16,12 @@ from .config import settings
 
 log = structlog.get_logger()
 
-LOCAL_UPLOAD_DIR = Path("./uploads")
-LOCAL_UPLOAD_DIR.mkdir(exist_ok=True)
+
+def get_upload_dir() -> Path:
+    """Upload directory for local storage (from UPLOAD_DIR). Created if missing."""
+    d = Path(settings.UPLOAD_DIR).resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +63,13 @@ async def _upload_to_s3(file: UploadFile, user_id: str, filename: str) -> str:
 
 
 async def _upload_to_local(file: UploadFile, filename: str) -> str:
-    dest = LOCAL_UPLOAD_DIR / filename
+    upload_dir = get_upload_dir()
+    dest = upload_dir / filename
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
     log.info("storage.local_upload", path=str(dest))
-    return str(dest)
+    # Return path relative to upload_dir so URL resolution (uploads/filename) still works
+    return f"uploads/{filename}"
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import settings
 from .models.db import Base, engine
+from .storage import get_upload_dir
 from .api.routes import router
 from .api.websocket import ws_router
 from .api.credentials_routes import creds_router
@@ -79,6 +80,4 @@ app.include_router(ebay_auth_router)
 
 # Serve uploaded images locally (skipped when S3 is active)
 if not settings.use_s3:
-    uploads_dir = Path("./uploads")
-    uploads_dir.mkdir(exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+    app.mount("/uploads", StaticFiles(directory=str(get_upload_dir())), name="uploads")

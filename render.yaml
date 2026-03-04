@@ -54,6 +54,10 @@ services:
       - key: PUBLIC_API_URL
         sync: false            # e.g. https://ernesto-w0b2.onrender.com
 
+      # --- Persistent disk (paid tier): set to your disk mount path, e.g. /data/uploads ---
+      - key: UPLOAD_DIR
+        sync: false            # default ./uploads; use /data/uploads for Render persistent storage
+
       # --- Auth (Supabase) — required when LOCAL_DEV=false ---
       - key: SUPABASE_URL
         sync: false            # e.g. https://xxxx.supabase.co

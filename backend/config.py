@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # e.g. https://ernesto-w0b2.onrender.com
     PUBLIC_API_URL: str = ""
 
+    # Local upload directory (used when S3 is not set). Default ./uploads; on Render paid tier
+    # set to your persistent disk mount path, e.g. /data/uploads
+    UPLOAD_DIR: str = "./uploads"
+
     # --- Local dev mode (bypasses auth, S3, Redis) ---
     # Set to false in production
     LOCAL_DEV: bool = True
