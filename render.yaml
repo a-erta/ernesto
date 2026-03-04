@@ -110,7 +110,7 @@ services:
         sync: false
       - key: EBAY_MERCHANT_LOCATION_KEY
         sync: false
-      # --- eBay OAuth (must be https://your-api.onrender.com/api/auth/ebay/callback) ---
+      # --- eBay OAuth: set to your RuName from Developer Portal (User Tokens → Redirect URL), not the callback URL ---
       - key: EBAY_OAUTH_REDIRECT_URI
         sync: false
 

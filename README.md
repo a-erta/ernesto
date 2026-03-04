@@ -338,25 +338,26 @@ In the Render dashboard, open the **ernesto-api** service → **Environment** an
 | `FERNET_KEY` | Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `EBAY_PROD_APP_ID` | eBay production app ID |
 | `EBAY_PROD_CERT_ID` | eBay production cert ID |
-| `EBAY_OAUTH_REDIRECT_URI` | **Set after first deploy** (see step 4) |
+| `EBAY_OAUTH_REDIRECT_URI` | **eBay RuName** from Developer Portal (see step 4), not the callback URL |
 | `EBAY_FULFILLMENT_POLICY_ID` / `EBAY_PAYMENT_POLICY_ID` / `EBAY_RETURN_POLICY_ID` | From `python test_ebay.py --prod` (optional if using OAuth only) |
 
 `DATABASE_URL` and `REDIS_URL` are filled automatically from the PostgreSQL and Redis services.
 
-### 4. First deploy and eBay OAuth URL
+### 4. First deploy and eBay OAuth (RuName)
 
-1. Trigger a deploy (or wait for the first one to finish).
-2. In the **ernesto-api** service, copy the **URL** (e.g. `https://ernesto-api-xxxx.onrender.com`).
-3. Set the OAuth callback URL:
-   - In **Render** → ernesto-api → **Environment**:  
-     `EBAY_OAUTH_REDIRECT_URI` = `https://ernesto-api-xxxx.onrender.com/api/auth/ebay/callback`  
-     (replace with your actual URL.)
-   - In **eBay Developer Portal** → Your app → **Get a Token** → **Your auth accepted URL**:  
-     same value: `https://ernesto-api-xxxx.onrender.com/api/auth/ebay/callback`  
-   - **Your auth declined URL**: e.g. `https://ernesto-api-xxxx.onrender.com/` or your frontend URL.
-4. Save and redeploy if you changed env vars.
+eBay uses a **RuName** (Redirect URL name), not the raw callback URL, in the OAuth request.
 
-After that, “Connect eBay” in the app will use HTTPS and satisfy eBay’s requirement.
+1. Trigger a deploy and copy your API URL (e.g. `https://ernesto-api-xxxx.onrender.com`).
+2. In **eBay Developer Portal** → Your app → **User Tokens** (next to Client ID) → **Get a Token from eBay via Your Application**:
+   - If you have no Redirect URL, click to add one and complete the form.
+   - Set **Auth Accepted URL** to: `https://ernesto-api-xxxx.onrender.com/api/auth/ebay/callback` (your real callback).
+   - Set **Auth Declined URL** (e.g. your frontend or API root).
+   - Save; eBay shows a **RuName** value (a string like `YourName-YourApp-PRD-xxxxx-xxxxx`).
+3. In **Render** → ernesto-api → **Environment**, set:
+   - `EBAY_OAUTH_REDIRECT_URI` = **that RuName value** (paste the RuName, not the callback URL).
+4. Save and redeploy.
+
+After that, “Connect eBay” uses the RuName and eBay redirects back to your callback.
 
 ### 5. Frontend (optional)
 
@@ -370,7 +371,7 @@ After that, “Connect eBay” in the app will use HTTPS and satisfy eBay’s re
 | 1 | Push repo (with `render.yaml`, `Dockerfile`) to GitHub |
 | 2 | Render → New → Blueprint → connect repo → Apply |
 | 3 | Set env vars for ernesto-api (OPENAI_API_KEY, FERNET_KEY, CORS_ORIGINS, eBay, etc.) |
-| 4 | After deploy, set `EBAY_OAUTH_REDIRECT_URI` and the same URL in eBay Developer Portal |
+| 4 | In eBay portal create a Redirect URL (Auth Accepted URL = your callback); set `EBAY_OAUTH_REDIRECT_URI` to the **RuName** |
 | 5 | (Optional) Deploy frontend as Static Site or use local frontend with CORS |
 
 > **Free tier:** Web services spin down after ~15 min idle (cold start ~30s). Starter plan ($7/mo) keeps the API always on.

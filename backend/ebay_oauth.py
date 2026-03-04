@@ -83,16 +83,27 @@ def get_authorize_url(
     scopes: str | None = None,
     sandbox: bool = False,
 ) -> str:
-    """Build the eBay OAuth authorize URL to send the user to."""
-    redirect_uri = redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI
+    """
+    Build the eBay OAuth authorize URL to send the user to.
+    redirect_uri must be the RuName from eBay Developer Portal (User Tokens → Redirect URL),
+    not the actual callback URL. In the portal you set "Auth Accepted URL" to your callback.
+    """
+    redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
+    if not redirect_uri:
+        raise ValueError(
+            "EBAY_OAUTH_REDIRECT_URI must be set to your eBay RuName (from Developer Portal → "
+            "User Tokens → Get a Token → Redirect URL). It is not your callback URL."
+        )
     scopes = scopes or getattr(settings, "EBAY_OAUTH_SCOPES", None) or DEFAULT_SCOPES
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    if not (client_id and client_id.strip()):
+        raise ValueError("eBay App ID missing. Set EBAY_PROD_APP_ID (or EBAY_APP_ID for sandbox).")
     base = AUTH_URL_SANDBOX if sandbox else AUTH_URL_PROD
     params = {
         "client_id": client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": scopes,
+        "scope": scopes.strip(),
         "state": make_state(user_id),
     }
     return f"{base}?{urlencode(params)}"

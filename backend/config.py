@@ -61,8 +61,10 @@ class Settings(BaseSettings):
     EBAY_MARKETPLACE_ID: str = "EBAY_US"
 
     # --- eBay OAuth (for per-user tokens; optional) ---
-    # Must match "Your auth accepted URL" in eBay Developer Portal → Get a Token → OAuth.
-    EBAY_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/ebay/callback"
+    # Must be the RuName (Redirect URL name) from eBay Developer Portal, NOT the callback URL.
+    # In the portal: User Tokens → Get a Token → add Redirect URL; set "Auth Accepted URL" to
+    # your callback (e.g. https://your-api.onrender.com/api/auth/ebay/callback), then copy the RuName here.
+    EBAY_OAUTH_REDIRECT_URI: str = ""
     # Space-separated OAuth scopes, e.g. "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
     EBAY_OAUTH_SCOPES: str = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.negotiation"
 
