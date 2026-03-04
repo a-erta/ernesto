@@ -132,13 +132,14 @@ async def exchange_code(
     """
     redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
-    client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    client_id = (settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID or "").strip()
     client_secret = _get_client_secret(sandbox)
     if not client_secret:
         raise ValueError(
             "eBay credentials required for OAuth token exchange. Set EBAY_PROD_CLIENT_SECRET or EBAY_PROD_CERT_ID "
             "(or EBAY_CLIENT_SECRET / EBAY_CERT_ID for sandbox). Developer Portal → Application Keys."
         )
+    # Avoid accidental whitespace from .env breaking Basic auth
     raw = f"{client_id}:{client_secret}"
     basic = base64.b64encode(raw.encode()).decode()
 
@@ -174,7 +175,7 @@ async def exchange_code(
                 sandbox=sandbox,
             )
             if r.status_code == 401:
-                cert_id = (settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID) or ""
+                cert_id = ((settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID) or "").strip()
                 client_sec_set = bool((settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET or "").strip())
                 if cert_id and client_sec_set:
                     log.info("ebay_oauth.exchange_code.retry_with_cert_id", sandbox=sandbox)

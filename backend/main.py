@@ -19,25 +19,33 @@ from .api.ebay_auth_routes import router as ebay_auth_router
 log = structlog.get_logger()
 
 
-def _mask_len(s: str) -> int:
-    return len(s) if s and s.strip() else 0
+def _mask_compare(s: str, head: int = 10, tail: int = 6) -> str:
+    """Mask a secret for log comparison: show first and last chars so you can match with portal."""
+    if not s or not s.strip():
+        return "(empty)"
+    s = s.strip()
+    if len(s) <= head + tail:
+        return s[:4] + ".." + s[-2:] if len(s) > 6 else "***"
+    return s[:head] + ".." + s[-tail:]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ernesto.startup", local_dev=settings.LOCAL_DEV, use_s3=settings.use_s3, use_redis=settings.use_redis)
-    # Confirm eBay OAuth env is loaded (e.g. from /etc/secrets/.env on Render)
+    # Log eBay OAuth env (masked) so you can compare with Developer Portal when debugging
     app_id = (settings.EBAY_PROD_APP_ID or "").strip()
     secret = (settings.EBAY_PROD_CLIENT_SECRET or "").strip()
     cert_id = (settings.EBAY_PROD_CERT_ID or "").strip()
     ru = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     log.info(
         "ernesto.ebay_oauth_config",
-        prod_app_id_set=bool(app_id),
+        prod_app_id=_mask_compare(app_id, 12, 8),
         prod_app_id_len=len(app_id),
-        prod_client_secret_set=bool(secret),
-        prod_cert_id_set=bool(cert_id),
-        redirect_uri_set=bool(ru),
+        prod_client_secret=_mask_compare(secret, 8, 6),
+        prod_client_secret_len=len(secret),
+        prod_cert_id=_mask_compare(cert_id, 12, 8),
+        prod_cert_id_len=len(cert_id),
+        redirect_uri=_mask_compare(ru, 12, 8),
         redirect_uri_len=len(ru),
     )
     async with engine.begin() as conn:
