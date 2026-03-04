@@ -19,9 +19,27 @@ from .api.ebay_auth_routes import router as ebay_auth_router
 log = structlog.get_logger()
 
 
+def _mask_len(s: str) -> int:
+    return len(s) if s and s.strip() else 0
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ernesto.startup", local_dev=settings.LOCAL_DEV, use_s3=settings.use_s3, use_redis=settings.use_redis)
+    # Confirm eBay OAuth env is loaded (e.g. from /etc/secrets/.env on Render)
+    app_id = (settings.EBAY_PROD_APP_ID or "").strip()
+    secret = (settings.EBAY_PROD_CLIENT_SECRET or "").strip()
+    cert_id = (settings.EBAY_PROD_CERT_ID or "").strip()
+    ru = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
+    log.info(
+        "ernesto.ebay_oauth_config",
+        prod_app_id_set=bool(app_id),
+        prod_app_id_len=len(app_id),
+        prod_client_secret_set=bool(secret),
+        prod_cert_id_set=bool(cert_id),
+        redirect_uri_set=bool(ru),
+        redirect_uri_len=len(ru),
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

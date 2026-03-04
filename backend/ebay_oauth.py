@@ -109,6 +109,17 @@ def get_authorize_url(
     return f"{base}?{urlencode(params)}"
 
 
+def _get_client_secret(sandbox: bool) -> str:
+    """Resolve client secret for token exchange. eBay may use Client Secret or Cert ID (portal-dependent)."""
+    if sandbox:
+        secret = (settings.EBAY_CLIENT_SECRET or "").strip()
+        fallback = (settings.EBAY_CERT_ID or "").strip()
+    else:
+        secret = (settings.EBAY_PROD_CLIENT_SECRET or "").strip()
+        fallback = (settings.EBAY_PROD_CERT_ID or "").strip()
+    return secret or fallback
+
+
 async def exchange_code(
     code: str,
     redirect_uri: str | None = None,
@@ -117,15 +128,16 @@ async def exchange_code(
     """
     Exchange authorization code for access_token and refresh_token.
     Returns dict with access_token, refresh_token, expires_in (seconds).
+    Uses EBAY_*_CLIENT_SECRET for Basic auth; if missing, falls back to EBAY_*_CERT_ID (some portals use Cert ID as secret).
     """
     redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
-    client_secret = settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET
-    if not (client_secret and client_secret.strip()):
+    client_secret = _get_client_secret(sandbox)
+    if not client_secret:
         raise ValueError(
-            "eBay Client Secret required for OAuth token exchange. Set EBAY_PROD_CLIENT_SECRET (or EBAY_CLIENT_SECRET for sandbox). "
-            "Find it in Developer Portal → Application Keys → (Production) → Client Secret."
+            "eBay credentials required for OAuth token exchange. Set EBAY_PROD_CLIENT_SECRET or EBAY_PROD_CERT_ID "
+            "(or EBAY_CLIENT_SECRET / EBAY_CERT_ID for sandbox). Developer Portal → Application Keys."
         )
     raw = f"{client_id}:{client_secret}"
     basic = base64.b64encode(raw.encode()).decode()
@@ -161,6 +173,38 @@ async def exchange_code(
             response=err_body,
             sandbox=sandbox,
         )
+        if r.status_code == 401:
+            cert_id = (settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID) or ""
+            client_sec_set = bool((settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET or "").strip())
+            if cert_id and client_sec_set:
+                log.info("ebay_oauth.exchange_code.retry_with_cert_id", sandbox=sandbox)
+                basic_cert = base64.b64encode(f"{client_id}:{cert_id}".encode()).decode()
+                r2 = await client.post(
+                    url,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Authorization": f"Basic {basic_cert}",
+                    },
+                    data={
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": redirect_uri,
+                    },
+                )
+                if r2.is_success:
+                    data = r2.json()
+                    log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox, used_cert_id=True)
+                    return {
+                        "access_token": data["access_token"],
+                        "refresh_token": data.get("refresh_token"),
+                        "expires_in": data.get("expires_in", 7200),
+                    }
+                try:
+                    err_body2 = r2.json()
+                except Exception:
+                    err_body2 = r2.text[:500]
+                log.error("ebay_oauth.exchange_code.retry_failed", status=r2.status_code, response=err_body2, sandbox=sandbox)
+                r = r2
     r.raise_for_status()
     data = r.json()
     log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox)
@@ -178,12 +222,13 @@ async def refresh_access_token(
     """
     Get a new access_token using refresh_token.
     Returns dict with access_token, expires_in; refresh_token may be rotated.
+    Uses _get_client_secret (Client Secret or Cert ID).
     """
     url = TOKEN_URL_SANDBOX if sandbox else TOKEN_URL_PROD
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
-    client_secret = settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET
-    if not (client_secret and client_secret.strip()):
-        raise ValueError("EBAY_PROD_CLIENT_SECRET (or EBAY_CLIENT_SECRET for sandbox) required for token refresh.")
+    client_secret = _get_client_secret(sandbox)
+    if not client_secret:
+        raise ValueError("EBAY_PROD_CLIENT_SECRET or EBAY_PROD_CERT_ID (or sandbox equivalents) required for token refresh.")
     raw = f"{client_id}:{client_secret}"
     basic = base64.b64encode(raw.encode()).decode()
 

@@ -132,6 +132,12 @@ async def ebay_callback(
         token_data = await exchange_code(code=code, sandbox=sandbox)
     except Exception as e:
         log.error("ebay_callback.exchange_failed", error=str(e), sandbox=sandbox)
+        err_msg = str(e).lower()
+        if "401" in err_msg or "unauthorized" in err_msg:
+            raise HTTPException(
+                status_code=502,
+                detail="eBay rejected our app credentials (401). On Render, set EBAY_PROD_APP_ID, EBAY_PROD_CLIENT_SECRET (or EBAY_PROD_CERT_ID), and EBAY_OAUTH_REDIRECT_URI to your Production RuName. Check Render logs for 'ebay_oauth.exchange_code.failed' to see eBay's response.",
+            ) from e
         raise
     expires_in = token_data.get("expires_in", 7200)
     expires_at = datetime.now(timezone.utc).timestamp() + expires_in
