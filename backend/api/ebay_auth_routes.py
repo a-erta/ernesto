@@ -2,7 +2,10 @@
 eBay OAuth 2.0 routes — start sign-in and handle callback.
 Each user gets their own token; refresh is used automatically when publishing.
 """
+import structlog
 from datetime import datetime, timezone
+
+log = structlog.get_logger()
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
@@ -96,7 +99,9 @@ async def ebay_callback(
         ))
     await db.commit()
 
-    # Redirect to frontend (e.g. settings or dashboard)
+    log.info("ebay_oauth.connected", user_id=user_id, sandbox=sandbox)
+
+    # Redirect to frontend so the app can close the popup and show "eBay connected"
     frontend_origin = settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:5173"
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=f"{frontend_origin}/?ebay_connected=1", status_code=302)
+    return RedirectResponse(url=f"{frontend_origin.rstrip('/')}/?ebay_connected=1", status_code=302)

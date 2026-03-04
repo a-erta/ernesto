@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Tag, Github, LogOut, Link2 } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
@@ -10,15 +10,31 @@ import { getBackendOrigin } from "./lib/api";
 import { BackendStatus } from "./components/BackendStatus";
 import { api } from "./lib/api";
 
+/** When we load with ?ebay_connected=1 after OAuth callback, close popup and notify opener. */
+function useEbayCallbackHandler() {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("ebay_connected") !== "1") return;
+    if (window.opener) {
+      window.opener.postMessage({ type: "ebay_connected" }, window.location.origin);
+      window.close();
+    } else {
+      window.history.replaceState({}, "", window.location.pathname || "/");
+    }
+  }, []);
+}
+
 function ConnectEbayButton() {
   const { session } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
 
   const handleConnect = async () => {
     setError(null);
+    setConnected(false);
     if (!isSupabaseConfigured) {
-      window.location.href = `${getBackendOrigin()}/api/auth/ebay/authorize`;
+      window.open(`${getBackendOrigin()}/api/auth/ebay/authorize`, "ebay_oauth", "width=600,height=700,scrollbars=yes");
       return;
     }
     if (!session?.access_token) {
@@ -30,17 +46,41 @@ function ConnectEbayButton() {
       const { data } = await api.get<{ url: string }>("/auth/ebay/authorize", {
         headers: { Accept: "application/json" },
       });
-      if (data?.url) window.location.href = data.url;
-      else setError("Could not get eBay authorization URL");
+      if (data?.url) {
+        const popup = window.open(data.url, "ebay_oauth", "width=600,height=700,scrollbars=yes");
+        if (popup) {
+          const t = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(t);
+              setLoading(false);
+            }
+          }, 300);
+          return;
+        }
+        window.location.href = data.url;
+      } else {
+        setError("Could not get eBay authorization URL");
+      }
     } catch (e: unknown) {
       const msg = e && typeof e === "object" && "response" in e
         ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
         : null;
       setError(msg || "Failed to start eBay connection");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "ebay_connected") {
+        setConnected(true);
+        setError(null);
+        setLoading(false);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   return (
     <button
@@ -52,9 +92,10 @@ function ConnectEbayButton() {
     >
       <Link2 className="w-4 h-4 shrink-0" />
       <span className="hidden sm:inline">
-        {loading ? "Redirecting…" : "Connect eBay"}
+        {loading ? "Connecting…" : connected ? "eBay connected" : "Connect eBay"}
       </span>
       {error && <span className="text-amber-400 text-xs">({error})</span>}
+      {connected && !error && <span className="text-emerald-500 text-xs">✓</span>}
     </button>
   );
 }
@@ -146,5 +187,6 @@ function ProtectedRoutes() {
 }
 
 export default function App() {
+  useEbayCallbackHandler();
   return <ProtectedRoutes />;
 }

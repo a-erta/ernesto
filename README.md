@@ -357,7 +357,7 @@ eBay uses a **RuName** (Redirect URL name), not the raw callback URL, in the OAu
    - `EBAY_OAUTH_REDIRECT_URI` = **that RuName value** (paste the RuName, not the callback URL).
 4. Save and redeploy.
 
-After that, “Connect eBay” uses the RuName and eBay redirects back to your callback.
+After that, “Connect eBay” opens eBay in a popup; when the user approves, eBay redirects to your callback, the backend saves the token and redirects to the frontend, the popup closes and the app shows "eBay connected". If you see eBay's "Thank you" page but the app never shows connected and publishing returns 401, check that **Auth Accepted URL** in the eBay portal is exactly `https://<your-api-host>/api/auth/ebay/callback` (with `callback`, not `call`).
 
 ### 5. Frontend (optional)
 
