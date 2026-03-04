@@ -162,49 +162,49 @@ async def exchange_code(
                 "redirect_uri": redirect_uri,
             },
         )
-    if not r.is_success:
-        try:
-            err_body = r.json()
-        except Exception:
-            err_body = r.text[:500]
-        log.error(
-            "ebay_oauth.exchange_code.failed",
-            status=r.status_code,
-            response=err_body,
-            sandbox=sandbox,
-        )
-        if r.status_code == 401:
-            cert_id = (settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID) or ""
-            client_sec_set = bool((settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET or "").strip())
-            if cert_id and client_sec_set:
-                log.info("ebay_oauth.exchange_code.retry_with_cert_id", sandbox=sandbox)
-                basic_cert = base64.b64encode(f"{client_id}:{cert_id}".encode()).decode()
-                r2 = await client.post(
-                    url,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Authorization": f"Basic {basic_cert}",
-                    },
-                    data={
-                        "grant_type": "authorization_code",
-                        "code": code,
-                        "redirect_uri": redirect_uri,
-                    },
-                )
-                if r2.is_success:
-                    data = r2.json()
-                    log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox, used_cert_id=True)
-                    return {
-                        "access_token": data["access_token"],
-                        "refresh_token": data.get("refresh_token"),
-                        "expires_in": data.get("expires_in", 7200),
-                    }
-                try:
-                    err_body2 = r2.json()
-                except Exception:
-                    err_body2 = r2.text[:500]
-                log.error("ebay_oauth.exchange_code.retry_failed", status=r2.status_code, response=err_body2, sandbox=sandbox)
-                r = r2
+        if not r.is_success:
+            try:
+                err_body = r.json()
+            except Exception:
+                err_body = r.text[:500]
+            log.error(
+                "ebay_oauth.exchange_code.failed",
+                status=r.status_code,
+                response=err_body,
+                sandbox=sandbox,
+            )
+            if r.status_code == 401:
+                cert_id = (settings.EBAY_PROD_CERT_ID if not sandbox else settings.EBAY_CERT_ID) or ""
+                client_sec_set = bool((settings.EBAY_PROD_CLIENT_SECRET if not sandbox else settings.EBAY_CLIENT_SECRET or "").strip())
+                if cert_id and client_sec_set:
+                    log.info("ebay_oauth.exchange_code.retry_with_cert_id", sandbox=sandbox)
+                    basic_cert = base64.b64encode(f"{client_id}:{cert_id}".encode()).decode()
+                    r2 = await client.post(
+                        url,
+                        headers={
+                            "Content-Type": "application/x-www-form-urlencoded",
+                            "Authorization": f"Basic {basic_cert}",
+                        },
+                        data={
+                            "grant_type": "authorization_code",
+                            "code": code,
+                            "redirect_uri": redirect_uri,
+                        },
+                    )
+                    if r2.is_success:
+                        data = r2.json()
+                        log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox, used_cert_id=True)
+                        return {
+                            "access_token": data["access_token"],
+                            "refresh_token": data.get("refresh_token"),
+                            "expires_in": data.get("expires_in", 7200),
+                        }
+                    try:
+                        err_body2 = r2.json()
+                    except Exception:
+                        err_body2 = r2.text[:500]
+                    log.error("ebay_oauth.exchange_code.retry_failed", status=r2.status_code, response=err_body2, sandbox=sandbox)
+                    r = r2
     r.raise_for_status()
     data = r.json()
     log.info("ebay_oauth.exchange_code.success", has_refresh=bool(data.get("refresh_token")), sandbox=sandbox)
