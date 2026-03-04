@@ -82,6 +82,7 @@ async def ebay_callback(
     access_token + refresh_token and store them. user_id comes from signed state.
     """
     q = dict(request.query_params)
+    ebay_error = q.get("error")
     log.info(
         "ebay_callback.hit",
         query_keys=list(q.keys()),
@@ -90,7 +91,21 @@ async def ebay_callback(
         code_len=len(code) if code else 0,
         state_len=len(state) if state else 0,
         sandbox=sandbox,
+        ebay_error=ebay_error,
     )
+    if ebay_error:
+        log.warning("ebay_callback.ebay_error", error=ebay_error, error_description=q.get("error_description", ""))
+        if ebay_error == "invalid_scope":
+            raise HTTPException(
+                status_code=400,
+                detail="eBay returned invalid_scope. Add OAuth scopes to your Production app: Developer Portal → "
+                "Application Keys → (Production) → OAuth Scopes. Ensure these are included: "
+                "https://api.ebay.com/oauth/api_scope, sell.inventory, sell.account, sell.fulfillment (sell.negotiation optional)",
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f"eBay authorization failed: {ebay_error}. {q.get('error_description', '')}".strip(),
+        )
     if not code or not state:
         if code and not state:
             log.warning(

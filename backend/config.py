@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # your callback (e.g. https://your-api.onrender.com/api/auth/ebay/callback), then copy the RuName here.
     EBAY_OAUTH_REDIRECT_URI: str = ""
     # Space-separated OAuth scopes, e.g. "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
-    EBAY_OAUTH_SCOPES: str = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.negotiation"
+    EBAY_OAUTH_SCOPES: str = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment"
 
     # --- eBay listing policies (set after running test_ebay.py --prod) ---
     # Policies are marketplace-specific — run test_ebay.py for each marketplace you use.

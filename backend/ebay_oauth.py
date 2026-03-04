@@ -15,13 +15,13 @@ from .config import settings
 
 log = structlog.get_logger()
 
-# Scopes required for Sell APIs (inventory, account, fulfillment, negotiation)
+# Scopes for listing and fulfillment (all in your granted list).
+# sell.negotiation (Best Offer) is not included by default — it often requires an extra license in Production; add via EBAY_OAUTH_SCOPES if granted.
 DEFAULT_SCOPES = (
     "https://api.ebay.com/oauth/api_scope "
     "https://api.ebay.com/oauth/api_scope/sell.inventory "
     "https://api.ebay.com/oauth/api_scope/sell.account "
-    "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
-    "https://api.ebay.com/oauth/api_scope/sell.negotiation"
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment"
 )
 
 TOKEN_URL_PROD = "https://api.ebay.com/identity/v1/oauth2/token"
