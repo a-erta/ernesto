@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./ernesto.db"
     SECRET_KEY: str = "dev-secret-key"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:8081"
+    # When using local uploads (no S3) on a deployed backend, set this so image URLs for eBay are absolute.
+    # e.g. https://ernesto-w0b2.onrender.com
+    PUBLIC_API_URL: str = ""
 
     # --- Local dev mode (bypasses auth, S3, Redis) ---
     # Set to false in production

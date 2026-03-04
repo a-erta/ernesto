@@ -83,8 +83,8 @@ class EbayAdapter(BasePlatformAdapter):
         sku = f"ernesto-{datetime.utcnow().timestamp()}"
 
         async with httpx.AsyncClient(base_url=self._base) as client:
-            # 1. Create inventory item
-            image_urls = [p for p in draft.image_paths if p.startswith("http")]
+            # 1. Create inventory item (draft.image_paths are already full URLs from publisher)
+            image_urls = [p for p in draft.image_paths if p and p.startswith("http")]
             if not image_urls:
                 log.warning("ebay.no_image_urls_using_placeholder", sku=sku)
                 image_urls = ["https://ir.ebaystatic.com/cr/v/c1/ebay-logo-1-1200x630-margin.png"]

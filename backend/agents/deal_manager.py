@@ -100,7 +100,9 @@ async def run_deal_manager(state: dict[str, Any]) -> dict[str, Any]:
 
     for listing in published_listings:
         platform_name = listing["platform"]
-        platform_listing_id = listing["platform_listing_id"]
+        platform_listing_id = listing.get("platform_listing_id")
+        if not platform_listing_id:
+            continue
         adapter_cls = PLATFORM_ADAPTERS.get(platform_name)
         if not adapter_cls:
             continue

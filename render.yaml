@@ -50,6 +50,10 @@ services:
       - key: CORS_ORIGINS
         sync: false            # e.g. https://your-frontend.onrender.com
 
+      # --- Public API URL (for image URLs when not using S3; use your service URL) ---
+      - key: PUBLIC_API_URL
+        sync: false            # e.g. https://ernesto-w0b2.onrender.com
+
       # --- Auth (Supabase) — required when LOCAL_DEV=false ---
       - key: SUPABASE_URL
         sync: false            # e.g. https://xxxx.supabase.co

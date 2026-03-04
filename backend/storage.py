@@ -74,12 +74,15 @@ def get_image_url(key: str) -> str:
     """
     Resolve a storage key to a publicly accessible URL.
     In S3 mode: returns a CloudFront URL.
-    In local mode: returns a path relative to the /uploads static mount.
+    In local mode: returns /uploads/{filename}; if PUBLIC_API_URL is set (e.g. on Render),
+    returns an absolute URL so eBay and other external consumers can fetch the image.
     """
     if settings.use_s3 and settings.CLOUDFRONT_DOMAIN:
         return f"https://{settings.CLOUDFRONT_DOMAIN}/{key}"
     if settings.use_s3:
         return f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{key}"
-    # Local: key is the full path like "uploads/abc.jpg"
     filename = Path(key).name
+    base = (settings.PUBLIC_API_URL or "").rstrip("/")
+    if base:
+        return f"{base}/uploads/{filename}"
     return f"/uploads/{filename}"

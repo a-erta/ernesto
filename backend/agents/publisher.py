@@ -11,6 +11,7 @@ from ..platforms.vinted import VintedAdapter
 from ..models.db import AsyncSessionLocal
 from ..api.credentials_routes import get_ebay_access_token
 from ..config import settings
+from ..storage import get_image_url
 
 log = structlog.get_logger()
 
@@ -57,13 +58,15 @@ async def run_publisher(state: dict[str, Any]) -> dict[str, Any]:
         else:
             description = raw_description
 
+        # Resolve storage keys to public URLs so eBay (and S3/CloudFront) get absolute URLs
+        image_urls = [get_image_url(k) for k in (image_paths or [])]
         draft = ListingDraft(
             title=title,
             description=description,
             price=final_price,
             category_id="29223",  # Antiquarian & Collectible — no required item specifics
             condition=item_data.get("condition", "good"),
-            image_paths=image_paths,
+            image_paths=image_urls,
         )
 
         try:
