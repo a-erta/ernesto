@@ -2,6 +2,7 @@
 eBay adapter using the eBay Sell API (REST).
 Sandbox mode is used by default; set EBAY_SANDBOX=false for production.
 """
+import asyncio
 import httpx
 import structlog
 from datetime import datetime
@@ -35,6 +36,23 @@ _MARKETPLACE_CURRENCIES = {
     "EBAY_NL": "EUR",
     "EBAY_CH": "CHF",
     "EBAY_PL": "PLN",
+}
+
+# Content-Language for createOffer (eBay recommends matching marketplace locale)
+_MARKETPLACE_CONTENT_LANGUAGE = {
+    "EBAY_US": "en-US",
+    "EBAY_IT": "it-IT",
+    "EBAY_DE": "de-DE",
+    "EBAY_FR": "fr-FR",
+    "EBAY_ES": "es-ES",
+    "EBAY_GB": "en-GB",
+    "EBAY_AU": "en-AU",
+    "EBAY_CA": "en-CA",
+    "EBAY_AT": "de-AT",
+    "EBAY_BE": "fr-BE",
+    "EBAY_NL": "nl-NL",
+    "EBAY_CH": "de-CH",
+    "EBAY_PL": "pl-PL",
 }
 
 def _marketplace_currency() -> str:
@@ -71,10 +89,13 @@ class EbayAdapter(BasePlatformAdapter):
         return "ebay"
 
     def _headers(self) -> dict:
+        content_lang = _MARKETPLACE_CONTENT_LANGUAGE.get(
+            self._marketplace_id, "en-US"
+        )
         return {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
-            "Content-Language": "en-US",
+            "Content-Language": content_lang,
             "X-EBAY-C-MARKETPLACE-ID": self._marketplace_id,
         }
 
@@ -110,7 +131,10 @@ class EbayAdapter(BasePlatformAdapter):
             resp.raise_for_status()
             log.info("ebay.inventory_item_created", sku=sku)
 
-            # 2. Create offer
+            # Allow eBay a moment to make the SKU available for the marketplace (avoids 25751 on non-US sites)
+            await asyncio.sleep(2)
+
+            # 2. Create offer (retry on 25751: SKU not found/not available for marketplace)
             listing_policies = draft.extra.get("listing_policies") or {
                 "fulfillmentPolicyId": settings.EBAY_FULFILLMENT_POLICY_ID,
                 "paymentPolicyId": settings.EBAY_PAYMENT_POLICY_ID,
@@ -139,14 +163,42 @@ class EbayAdapter(BasePlatformAdapter):
             if merchant_location_key:
                 offer_payload["merchantLocationKey"] = merchant_location_key
 
-            resp = await client.post(
-                "/sell/inventory/v1/offer",
-                json=offer_payload,
-                headers=self._headers(),
-            )
-            if not resp.is_success:
+            def _is_sku_not_available(resp: httpx.Response) -> bool:
+                if resp.status_code != 400:
+                    return False
+                try:
+                    data = resp.json()
+                    for err in data.get("errors", []):
+                        if err.get("errorId") == 25751:
+                            return True
+                    return False
+                except Exception:
+                    return False
+
+            max_offer_attempts = 3
+            resp = None
+            for attempt in range(max_offer_attempts):
+                resp = await client.post(
+                    "/sell/inventory/v1/offer",
+                    json=offer_payload,
+                    headers=self._headers(),
+                )
+                if resp.is_success:
+                    break
+                if _is_sku_not_available(resp) and attempt < max_offer_attempts - 1:
+                    wait_sec = 3 + attempt * 2
+                    log.info(
+                        "ebay.offer_retry",
+                        sku=sku,
+                        marketplace_id=self._marketplace_id,
+                        attempt=attempt + 1,
+                        wait_sec=wait_sec,
+                    )
+                    await asyncio.sleep(wait_sec)
+                    continue
                 log.error("ebay.offer_error", status=resp.status_code, body=resp.text, payload=offer_payload)
-            resp.raise_for_status()
+                resp.raise_for_status()
+            assert resp is not None and resp.is_success
             offer_id = resp.json()["offerId"]
 
             # 3. Publish offer
