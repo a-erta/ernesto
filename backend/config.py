@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # In the portal: User Tokens → Get a Token → add Redirect URL; set "Auth Accepted URL" to
     # your callback (e.g. https://your-api.onrender.com/api/auth/ebay/callback), then copy the RuName here.
     EBAY_OAUTH_REDIRECT_URI: str = ""
+    # RuName for the list_ebay_policies.py script's local callback. In the portal add a Redirect URL
+    # with Auth Accepted URL = http://127.0.0.1:8765/ and copy the RuName here.
+    EBAY_SCRIPT_REDIRECT_URI: str = ""
     # Space-separated OAuth scopes, e.g. "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
     EBAY_OAUTH_SCOPES: str = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment"
 

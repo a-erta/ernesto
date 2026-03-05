@@ -99,6 +99,44 @@ class EbayAdapter(BasePlatformAdapter):
             "X-EBAY-C-MARKETPLACE-ID": self._marketplace_id,
         }
 
+    async def get_user_listing_policies(self) -> Optional[dict]:
+        """
+        Fetch this user's fulfillment, payment, and return policy IDs for the current marketplace
+        via the Account API. Returns dict with fulfillmentPolicyId, paymentPolicyId, returnPolicyId,
+        or None if any call fails or no policies exist (caller should fall back to env or error).
+        """
+        async with httpx.AsyncClient(base_url=self._base, headers=self._headers()) as client:
+            try:
+                r = await client.get(
+                    "/sell/account/v1/fulfillment_policy",
+                    params={"marketplace_id": self._marketplace_id},
+                )
+                if r.status_code != 200:
+                    return None
+                fulfillments = (r.json() or {}).get("fulfillmentPolicies") or []
+                r = await client.get(
+                    "/sell/account/v1/payment_policy",
+                    params={"marketplace_id": self._marketplace_id},
+                )
+                if r.status_code != 200:
+                    return None
+                payments = (r.json() or {}).get("paymentPolicies") or []
+                r = await client.get(
+                    "/sell/account/v1/return_policy",
+                    params={"marketplace_id": self._marketplace_id},
+                )
+                if r.status_code != 200:
+                    return None
+                returns = (r.json() or {}).get("returnPolicies") or []
+            except Exception:
+                return None
+            fid = fulfillments[0]["fulfillmentPolicyId"] if fulfillments else None
+            pid = payments[0]["paymentPolicyId"] if payments else None
+            rid = returns[0]["returnPolicyId"] if returns else None
+            if fid and pid and rid:
+                return {"fulfillmentPolicyId": fid, "paymentPolicyId": pid, "returnPolicyId": rid}
+            return None
+
     async def post_listing(self, draft: ListingDraft) -> PublishedListing:
         """Create an inventory item + offer, then publish."""
         sku = f"ernesto-{datetime.utcnow().timestamp()}"
@@ -134,17 +172,24 @@ class EbayAdapter(BasePlatformAdapter):
             # Allow eBay a moment to make the SKU available for the marketplace (avoids 25751 on non-US sites)
             await asyncio.sleep(2)
 
-            # 2. Create offer (retry on 25751: SKU not found/not available for marketplace)
-            listing_policies = draft.extra.get("listing_policies") or {
-                "fulfillmentPolicyId": settings.EBAY_FULFILLMENT_POLICY_ID,
-                "paymentPolicyId": settings.EBAY_PAYMENT_POLICY_ID,
-                "returnPolicyId": settings.EBAY_RETURN_POLICY_ID,
-            }
+            # 2. Create offer — use user's policies from Account API when using OAuth token; else env
+            listing_policies = draft.extra.get("listing_policies")
+            if not listing_policies or not listing_policies.get("fulfillmentPolicyId"):
+                user_policies = await self.get_user_listing_policies()
+                if user_policies:
+                    listing_policies = user_policies
+                    log.info("ebay.using_user_policies", marketplace_id=self._marketplace_id)
+                else:
+                    listing_policies = {
+                        "fulfillmentPolicyId": settings.EBAY_FULFILLMENT_POLICY_ID,
+                        "paymentPolicyId": settings.EBAY_PAYMENT_POLICY_ID,
+                        "returnPolicyId": settings.EBAY_RETURN_POLICY_ID,
+                    }
             if not listing_policies.get("fulfillmentPolicyId"):
                 raise ValueError(
-                    "eBay requires listing policies. Run 'python test_ebay.py --prod' to set up "
-                    "policies and add EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, "
-                    "EBAY_RETURN_POLICY_ID to backend/.env."
+                    "eBay needs shipping, payment, and return policies for your account. "
+                    "Create them in eBay Seller Hub (Account → Gestore delle Regole di vendita / Sales rule manager), "
+                    "then try publishing again."
                 )
             offer_payload = {
                 "sku": sku,
