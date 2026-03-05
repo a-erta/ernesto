@@ -29,25 +29,65 @@ def _mask_compare(s: str, head: int = 10, tail: int = 6) -> str:
     return s[:head] + ".." + s[-tail:]
 
 
+def _mask_secret(s: str, head: int = 4, tail: int = 3) -> str:
+    """Mask a secret: show only set/len and first/last few chars."""
+    if not s or not s.strip():
+        return "(empty)"
+    s = s.strip()
+    if len(s) <= head + tail:
+        return "***" if len(s) <= 6 else s[:2] + ".." + s[-2:]
+    return s[:head] + ".." + s[-tail:]
+
+
+def _bootstrap_env_log() -> None:
+    """Log all important env vars at bootstrap (masked) so you can verify secrets are loaded."""
+    s = settings
+    log.info(
+        "ernesto.env_bootstrap",
+        # Core
+        LOCAL_DEV=s.LOCAL_DEV,
+        DATABASE_URL_kind="postgresql" if s.use_postgres else "sqlite",
+        SECRET_KEY_set=bool((s.SECRET_KEY or "").strip()),
+        SECRET_KEY_len=len((s.SECRET_KEY or "").strip()),
+        OPENAI_API_KEY_set=bool((s.OPENAI_API_KEY or "").strip()),
+        OPENAI_API_KEY_mask=_mask_secret(s.OPENAI_API_KEY or "", 6, 4),
+        PUBLIC_API_URL=(s.PUBLIC_API_URL or "").strip() or "(empty)",
+        UPLOAD_DIR=(s.UPLOAD_DIR or "").strip(),
+        CORS_ORIGINS_count=len(s.cors_origins_list),
+        # Auth (Supabase)
+        SUPABASE_URL_set=bool((s.SUPABASE_URL or "").strip()),
+        SUPABASE_URL_domain=_mask_compare((s.SUPABASE_URL or "").strip(), 24, 8) if (s.SUPABASE_URL or "").strip() else "(empty)",
+        SUPABASE_ANON_KEY_set=bool((s.SUPABASE_ANON_KEY or "").strip()),
+        SUPABASE_JWT_SECRET_set=bool((s.SUPABASE_JWT_SECRET or "").strip()),
+        # Storage
+        use_s3=s.use_s3,
+        S3_BUCKET=(s.S3_BUCKET or "").strip() or "(empty)",
+        AWS_ACCESS_KEY_ID_set=bool((s.AWS_ACCESS_KEY_ID or "").strip()),
+        # Redis
+        use_redis=s.use_redis,
+        REDIS_URL_set=bool((s.REDIS_URL or "").strip()),
+        # Encryption
+        FERNET_KEY_set=bool((s.FERNET_KEY or "").strip()),
+        FERNET_KEY_len=len((s.FERNET_KEY or "").strip()),
+        # eBay production
+        EBAY_MARKETPLACE_ID=(s.EBAY_MARKETPLACE_ID or "EBAY_US").strip(),
+        EBAY_PROD_APP_ID=_mask_compare((s.EBAY_PROD_APP_ID or "").strip(), 12, 8),
+        EBAY_PROD_CERT_ID=_mask_compare((s.EBAY_PROD_CERT_ID or "").strip(), 12, 8),
+        EBAY_PROD_CLIENT_SECRET=_mask_compare((s.EBAY_PROD_CLIENT_SECRET or "").strip(), 8, 6),
+        EBAY_OAUTH_REDIRECT_URI=_mask_compare((s.EBAY_OAUTH_REDIRECT_URI or "").strip(), 12, 8),
+        EBAY_FULFILLMENT_POLICY_ID=(s.EBAY_FULFILLMENT_POLICY_ID or "").strip() or "(empty)",
+        EBAY_PAYMENT_POLICY_ID=(s.EBAY_PAYMENT_POLICY_ID or "").strip() or "(empty)",
+        EBAY_RETURN_POLICY_ID=(s.EBAY_RETURN_POLICY_ID or "").strip() or "(empty)",
+        EBAY_MERCHANT_LOCATION_KEY=(s.EBAY_MERCHANT_LOCATION_KEY or "").strip() or "(empty)",
+        # Optional
+        TELEGRAM_BOT_TOKEN_set=bool((s.TELEGRAM_BOT_TOKEN or "").strip()),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ernesto.startup", local_dev=settings.LOCAL_DEV, use_s3=settings.use_s3, use_redis=settings.use_redis)
-    # Log eBay OAuth env (masked) so you can compare with Developer Portal when debugging
-    app_id = (settings.EBAY_PROD_APP_ID or "").strip()
-    secret = (settings.EBAY_PROD_CLIENT_SECRET or "").strip()
-    cert_id = (settings.EBAY_PROD_CERT_ID or "").strip()
-    ru = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
-    log.info(
-        "ernesto.ebay_oauth_config",
-        prod_app_id=_mask_compare(app_id, 12, 8),
-        prod_app_id_len=len(app_id),
-        prod_client_secret=_mask_compare(secret, 8, 6),
-        prod_client_secret_len=len(secret),
-        prod_cert_id=_mask_compare(cert_id, 12, 8),
-        prod_cert_id_len=len(cert_id),
-        redirect_uri=_mask_compare(ru, 12, 8),
-        redirect_uri_len=len(ru),
-    )
+    _bootstrap_env_log()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

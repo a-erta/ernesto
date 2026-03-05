@@ -208,6 +208,22 @@ class EbayAdapter(BasePlatformAdapter):
             )
             if not resp.is_success:
                 log.error("ebay.publish_error", status=resp.status_code, body=resp.text, offer_id=offer_id)
+                # 25007 = invalid fulfillment/shipping policy (e.g. policy for wrong marketplace or missing shipping service)
+                try:
+                    data = resp.json()
+                    for err in data.get("errors", []):
+                        if err.get("errorId") == 25007:
+                            raise ValueError(
+                                f"eBay publish failed: invalid fulfillment/shipping policy (error 25007). "
+                                f"For {self._marketplace_id} you must use fulfillment, payment, and return policies "
+                                f"created for this marketplace. In Seller Hub or via Account API create policies "
+                                f"for {self._marketplace_id}, then set EBAY_FULFILLMENT_POLICY_ID, "
+                                f"EBAY_PAYMENT_POLICY_ID, EBAY_RETURN_POLICY_ID in your .env to those policy IDs."
+                            ) from None
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
             resp.raise_for_status()
             listing_id = resp.json()["listingId"]
 
