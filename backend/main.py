@@ -111,8 +111,9 @@ app.add_middleware(
 )
 
 @app.get("/")
+@app.head("/")
 def root():
-    """API is up. Use /docs for interactive docs."""
+    """API is up. Use /docs for interactive docs. HEAD supported for Render health checks."""
     return {"service": "ernesto", "docs": "/docs", "health": "ok"}
 
 
