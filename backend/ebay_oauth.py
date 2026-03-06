@@ -44,10 +44,11 @@ def _b64d(s: str) -> bytes:
 STATE_TTL_SECONDS = 600  # 10 minutes
 
 
-def make_state(user_id: str) -> str:
-    """Create a signed state parameter so we can recover user_id in the callback."""
+def make_state(user_id: str, redirect_origin: str = "") -> str:
+    """Create a signed state parameter. redirect_origin is sent back in callback for redirect URL."""
     issued = int(time.time())
-    raw = f"{user_id}.{issued}"
+    origin_b64 = base64.urlsafe_b64encode(redirect_origin.encode()).decode().rstrip("=")
+    raw = f"{user_id}.{issued}.{origin_b64}"
     sig = hmac.new(
         settings.SECRET_KEY.encode(),
         raw.encode(),
@@ -56,8 +57,8 @@ def make_state(user_id: str) -> str:
     return _b64(f"{raw}.{sig}".encode())
 
 
-def verify_state(state: str) -> str | None:
-    """Verify state and return user_id, or None if invalid/expired."""
+def verify_state(state: str) -> tuple[str | None, str]:
+    """Verify state; return (user_id, redirect_origin). redirect_origin may be empty."""
     try:
         decoded = _b64d(state).decode()
         raw, sig = decoded.rsplit(".", 1)
@@ -67,14 +68,23 @@ def verify_state(state: str) -> str | None:
             hashlib.sha256,
         ).hexdigest()[:32]
         if not hmac.compare_digest(sig, expected):
-            return None
-        user_id, issued_str = raw.rsplit(".", 1)
+            return None, ""
+        parts = raw.rsplit(".", 2)
+        if len(parts) == 3:
+            user_id, issued_str, origin_b64 = parts
+            pad = 4 - len(origin_b64) % 4
+            if pad != 4:
+                origin_b64 += "=" * pad
+            redirect_origin = base64.urlsafe_b64decode(origin_b64).decode()
+        else:
+            user_id, issued_str = raw.rsplit(".", 1)
+            redirect_origin = ""
         issued = int(issued_str)
         if time.time() - issued > STATE_TTL_SECONDS:
-            return None
-        return user_id
+            return None, ""
+        return user_id, redirect_origin
     except Exception:
-        return None
+        return None, ""
 
 
 def get_authorize_url(
@@ -82,11 +92,12 @@ def get_authorize_url(
     redirect_uri: str | None = None,
     scopes: str | None = None,
     sandbox: bool = False,
+    redirect_origin: str = "",
 ) -> str:
     """
     Build the eBay OAuth authorize URL to send the user to.
     redirect_uri must be the RuName from eBay Developer Portal (User Tokens → Redirect URL),
-    not the actual callback URL. In the portal you set "Auth Accepted URL" to your callback.
+    not the actual callback URL. redirect_origin is the frontend origin to redirect to after OAuth.
     """
     redirect_uri = (redirect_uri or settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     if not redirect_uri:
@@ -104,7 +115,7 @@ def get_authorize_url(
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "scope": scopes.strip(),
-        "state": make_state(user_id),
+        "state": make_state(user_id, redirect_origin=(redirect_origin or "").strip()),
     }
     return f"{base}?{urlencode(params)}"
 

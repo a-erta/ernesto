@@ -34,7 +34,8 @@ function ConnectEbayButton() {
     setError(null);
     setConnected(false);
     if (!isSupabaseConfigured) {
-      window.open(`${getBackendOrigin()}/api/auth/ebay/authorize`, "ebay_oauth", "width=600,height=700,scrollbars=yes");
+      const origin = encodeURIComponent(window.location.origin);
+      window.open(`${getBackendOrigin()}/api/auth/ebay/authorize?redirect_origin=${origin}`, "ebay_oauth", "width=600,height=700,scrollbars=yes");
       return;
     }
     if (!session?.access_token) {
@@ -45,6 +46,7 @@ function ConnectEbayButton() {
     try {
       const { data } = await api.get<{ url: string }>("/auth/ebay/authorize", {
         headers: { Accept: "application/json" },
+        params: { redirect_origin: window.location.origin },
       });
       if (data?.url) {
         const popup = window.open(data.url, "ebay_oauth", "width=600,height=700,scrollbars=yes");

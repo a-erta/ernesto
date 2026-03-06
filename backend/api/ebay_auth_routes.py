@@ -36,17 +36,20 @@ def _mask(s: str, show: int = 6) -> str:
 async def ebay_authorize(
     request: Request,
     sandbox: bool = Query(False),
+    redirect_origin: str | None = Query(None, description="Frontend origin to redirect to after OAuth (must be in CORS)"),
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
     Redirect the user to eBay sign-in. After they approve, eBay redirects back
-    to EBAY_OAUTH_REDIRECT_URI with ?code=...&state=...
+    to the callback; we then redirect the browser to redirect_origin (or first CORS origin).
 
-    When the client sends Accept: application/json (e.g. from fetch with auth),
-    returns {"url": "..."} so the frontend can redirect after attaching the token.
+    Pass redirect_origin (e.g. https://your-app.onrender.com) so the popup returns to the right app.
     """
     runame = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
+    origin = (redirect_origin or request.headers.get("origin") or "").strip()
+    if origin and origin not in settings.cors_origins_list:
+        origin = ""
     log.info(
         "ebay_authorize.start",
         user_id=current_user.user_id,
@@ -57,6 +60,7 @@ async def ebay_authorize(
     url = get_authorize_url(
         user_id=current_user.user_id,
         sandbox=sandbox,
+        redirect_origin=origin,
     )
     log.info(
         "ebay_authorize.redirect",
@@ -122,7 +126,7 @@ async def ebay_callback(
             detail="Missing code or state. eBay should redirect here with ?code=...&state=... after the user approves.",
         )
 
-    user_id = verify_state(state)
+    user_id, stored_origin = verify_state(state)
     if not user_id:
         log.warning("ebay_callback.state_invalid", state_len=len(state))
         raise HTTPException(status_code=400, detail="Invalid or expired state")
@@ -175,8 +179,8 @@ async def ebay_callback(
 
     log.info("ebay_oauth.connected", user_id=user_id, sandbox=sandbox)
 
-    # Redirect to frontend so the app can close the popup and show "eBay connected"
-    frontend_origin = settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:5173"
+    # Redirect to the frontend that started the flow (stored in state), or first CORS origin
+    frontend_origin = (stored_origin if stored_origin and stored_origin in settings.cors_origins_list else None) or (settings.cors_origins_list[0] if settings.cors_origins_list else "http://localhost:5173")
     redirect_to = f"{frontend_origin.rstrip('/')}/?ebay_connected=1"
     log.info("ebay_callback.redirect_to_frontend", frontend_origin=frontend_origin, redirect_url=redirect_to)
     from fastapi.responses import RedirectResponse
