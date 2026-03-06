@@ -5,7 +5,7 @@ Sandbox mode is used by default; set EBAY_SANDBOX=false for production.
 import asyncio
 import httpx
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .base import (
@@ -357,26 +357,38 @@ class EbayAdapter(BasePlatformAdapter):
             return resp.is_success
 
     async def get_messages(self, platform_listing_id: str) -> List[PlatformMessage]:
+        """Fetch Post-Order INR (Item Not Received) inquiries for this listing.
+        Uses GET /post-order/v2/inquiry/search (not /inquiry). Not supported in sandbox."""
         async with httpx.AsyncClient(base_url=self._base) as client:
             resp = await client.get(
-                f"/post-order/v2/inquiry?item_id={platform_listing_id}",
+                "/post-order/v2/inquiry/search",
+                params={"item_id": platform_listing_id},
                 headers=self._headers(),
             )
-            if resp.status_code in (404, 204):
+            if resp.status_code in (400, 404, 204):
+                # 400 can occur if item has no inquiries or API constraints; treat as empty
                 return []
             resp.raise_for_status()
 
+        data = resp.json()
+        members = data.get("members") or []
         messages = []
-        for m in resp.json().get("inquiries", []):
+        for m in members:
+            creation = m.get("creationDate") or {}
+            ts = creation.get("value") if isinstance(creation, dict) else creation
+            if isinstance(ts, str):
+                ts = ts.replace("Z", "+00:00")
+                received_at = datetime.fromisoformat(ts)
+            else:
+                received_at = datetime.now(timezone.utc)
+            buyer = m.get("buyer") if isinstance(m.get("buyer"), str) else (m.get("buyer") or {}).get("username", "unknown")
             messages.append(
                 PlatformMessage(
-                    platform_message_id=m["inquiryId"],
+                    platform_message_id=str(m.get("inquiryId", "")),
                     listing_id=platform_listing_id,
-                    buyer_username=m.get("buyer", {}).get("username", "unknown"),
-                    content=m.get("inquiryMessage", ""),
-                    received_at=datetime.fromisoformat(
-                        m["creationDate"].replace("Z", "+00:00")
-                    ),
+                    buyer_username=buyer if isinstance(buyer, str) else "unknown",
+                    content=m.get("inquiryMessage", "") or "INR inquiry",  # search returns summary, no message body
+                    received_at=received_at,
                 )
             )
         return messages
