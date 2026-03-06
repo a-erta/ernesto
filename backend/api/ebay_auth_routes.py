@@ -47,8 +47,14 @@ async def ebay_authorize(
     """
     runame = (settings.EBAY_OAUTH_REDIRECT_URI or "").strip()
     client_id = settings.EBAY_PROD_APP_ID if not sandbox else settings.EBAY_APP_ID
-    origin = (redirect_origin or request.headers.get("origin") or "").strip()
-    if origin and origin not in settings.cors_origins_list:
+    # Prefer Origin header (browser-set) so deployed frontend gets correct redirect even if param is wrong
+    header_origin = (request.headers.get("origin") or "").strip()
+    param_origin = (redirect_origin or "").strip()
+    if header_origin and header_origin in settings.cors_origins_list:
+        origin = header_origin
+    elif param_origin and param_origin in settings.cors_origins_list:
+        origin = param_origin
+    else:
         origin = ""
     log.info(
         "ebay_authorize.start",
